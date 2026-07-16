@@ -97,9 +97,17 @@ let vimAuthenticationF5BigIpAPM = (
             Dst = Dvc,
             Src = SrcIpAddr,
             Type = "Syslog";
+    // Inner join, and only against successful logons: "Session deleted" fires for
+    // ANY abandoned session object, including ones whose logon attempt failed or
+    // never happened (APM garbage-collects them a few minutes later) - confirmed
+    // against a real failed session that got a "Session deleted" 5 minutes after
+    // its failed logon, with no successful auth in between. Reporting that as a
+    // Logoff would falsely imply the user got in; only sessions that actually
+    // reached EventResult="Success" represent a real logon-then-logoff pair.
     let LogoffEvents = SessionEnds
-        | join kind=leftouter (
+        | join kind=inner (
             LogonEvents
+            | where EventResult == "Success"
             | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetAppName, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst
         ) on SessionId
         | extend
