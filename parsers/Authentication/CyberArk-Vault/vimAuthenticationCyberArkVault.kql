@@ -1,8 +1,9 @@
 // Parameterized (vim) variant of ASimAuthenticationCyberArkVault.
 // Same mapping as the parameter-less version (see that file for details on the
-// three relevant Activity values and the SrcIpAddr field choice), with standard
-// ASIM filtering parameters added. Time filters run first since CommonSecurityLog
-// rows map 1:1 to output rows here (no correlation step to filter around).
+// three relevant Activity values, the SrcIpAddr field choice, and why EventUid
+// uses _ItemId instead of _ResourceId), with standard ASIM filtering parameters
+// added. Time filters run first since CommonSecurityLog rows map 1:1 to output
+// rows here (no correlation step to filter around).
 let vimAuthenticationCyberArkVault = (
         starttime: datetime = datetime(null),
         endtime: datetime = datetime(null),
@@ -35,7 +36,7 @@ let vimAuthenticationCyberArkVault = (
         Dvc = coalesce(Computer, DvcIpAddr),
         TargetAppName = "CyberArk Vault",
         LogonTarget = "CyberArk Vault",
-        EventUid = _ResourceId,
+        EventUid = _ItemId,
         EventCount = 1,
         EventStartTime = TimeGenerated,
         EventEndTime = TimeGenerated,

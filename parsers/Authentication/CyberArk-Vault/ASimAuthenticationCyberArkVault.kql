@@ -18,6 +18,12 @@
 //
 // SourceTranslatedAddress (not SourceIP, which is empty in this environment's
 // data) carries the real client IP for this connector's field mapping.
+//
+// EventUid uses _ItemId (Log Analytics' per-row unique identifier), not
+// _ResourceId: _ResourceId identifies the collector VM that forwarded the
+// log, not the individual event, so many unrelated events from the same
+// collector share it - confirmed against real data, where a single
+// _ResourceId value was shared by ~45,000 distinct rows.
 let ASimAuthenticationCyberArkVault = (disabled: bool = false) {
     CommonSecurityLog
     | where not(disabled)
@@ -41,7 +47,7 @@ let ASimAuthenticationCyberArkVault = (disabled: bool = false) {
         Dvc = coalesce(Computer, DvcIpAddr),
         TargetAppName = "CyberArk Vault",
         LogonTarget = "CyberArk Vault",
-        EventUid = _ResourceId,
+        EventUid = _ItemId,
         EventCount = 1,
         EventStartTime = TimeGenerated,
         EventEndTime = TimeGenerated,
