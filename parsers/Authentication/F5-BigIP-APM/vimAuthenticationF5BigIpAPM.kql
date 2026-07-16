@@ -1,21 +1,11 @@
 // Parameterized (vim) variant of ASimAuthenticationF5BigIpAPM.
-// Same session-correlation logic (see ASimAuthenticationF5BigIpAPM.kql for details,
-// including why SessionId is a fixed {8}-hex regex rather than "up to the next ': '"
-// — some lines invoke a shared macro policy and would otherwise split one real
-// session into two correlation groups), with standard ASIM filtering parameters
-// added. Time filters run before the per-session correlation; the remaining
-// filters run after, since TargetUsername, SrcIpAddr and EventResult only exist
-// once lines for a session have been merged.
-//
-// Confirmed against real data: on a failed logon, APM never sets
-// 'session.user.clientip' (only written later, after a successful auth
-// continues past the logon page) — SrcIpAddr is reliably empty on every
-// Failure row. That's a gap in this Syslog stream, not a mapping bug; if you
-// need the source IP on failed attempts too, correlate by time + TargetUsername
-// against another F5 log (e.g. the LTM/WAF HTTP access log for the VPN portal).
-// Also, the RADIUS reject only carries a generic "Access-Reject" with no reason
-// code, so EventResultDetails for a Failure is "Other" rather than a guessed
-// specific reason the source data doesn't actually support.
+// Same session-correlation logic (see ASimAuthenticationF5BigIpAPM.kql for full
+// details — SessionId's fixed {8}-hex regex, why SrcIpAddr comes from "New
+// session from client IP" rather than the session variable, and why "Session
+// deleted" produces a second EventType="Logoff" row per session), with
+// standard ASIM filtering parameters added. Time filters run before each base
+// Syslog read; the remaining filters run after the union, since TargetUsername,
+// SrcIpAddr and EventResult only exist once lines for a session are merged.
 let vimAuthenticationF5BigIpAPM = (
         starttime: datetime = datetime(null),
         endtime: datetime = datetime(null),
@@ -24,6 +14,26 @@ let vimAuthenticationF5BigIpAPM = (
         eventresult_in: dynamic = dynamic([]),
         disabled: bool = false
     ) {
+    let SessionClientIps = Syslog
+        | where not(disabled)
+        | where isnull(starttime) or TimeGenerated >= starttime
+        | where isnull(endtime) or TimeGenerated <= endtime
+        | where SyslogMessage has "New session from client IP"
+        | extend
+            SessionId = extract(@":Common:([0-9a-f]{8}):", 1, SyslogMessage),
+            ClientIp = extract(@"New session from client IP (\S+)", 1, SyslogMessage)
+        | where isnotempty(SessionId) and isnotempty(ClientIp)
+        | summarize SrcIpAddr = take_any(ClientIp) by SessionId;
+    let SessionEnds = Syslog
+        | where not(disabled)
+        | where isnull(starttime) or TimeGenerated >= starttime
+        | where isnull(endtime) or TimeGenerated <= endtime
+        | where SyslogMessage has "Session deleted"
+        | extend
+            SessionId = extract(@":Common:([0-9a-f]{8}):", 1, SyslogMessage),
+            SessionDeletedReason = extract(@"Session deleted\s*\(([^)]+)\)", 1, SyslogMessage)
+        | where isnotempty(SessionId)
+        | summarize LogoffTime = max(TimeGenerated), Dvc = any(Computer), SessionDeletedReason = take_any(SessionDeletedReason) by SessionId;
     let RawEvents = Syslog
         | where not(disabled)
         | where isnull(starttime) or TimeGenerated >= starttime
@@ -35,63 +45,85 @@ let vimAuthenticationF5BigIpAPM = (
             AuthUsername = extract(@"authenticate with '([^']+)' (successfully|failed)", 1, SyslogMessage),
             AuthOutcome = extract(@"authenticate with '([^']+)' (successfully|failed)", 2, SyslogMessage),
             SessionUsername = extract(@"Username '([^']+)'$", 1, SyslogMessage),
-            SessionClientIp = extract(@"clientip is (\S+)$", 1, SyslogMessage),
             SessionTerminalOut = extract(@"terminalout '([^']+)'$", 1, SyslogMessage)
         | where isnotempty(SessionId);
-    RawEvents
-    | summarize
-        EventStartTime = min(TimeGenerated),
-        EventEndTime = max(TimeGenerated),
-        RawLineCount = count(),
-        Dvc = any(Computer),
-        AuthUsername = take_anyif(AuthUsername, isnotempty(AuthUsername)),
-        SessionUsername = take_anyif(SessionUsername, isnotempty(SessionUsername)),
-        SrcIpAddr = take_anyif(SessionClientIp, isnotempty(SessionClientIp)),
-        AuthSuccessCount = countif(AuthOutcome =~ "successfully"),
-        AuthFailureCount = countif(AuthOutcome =~ "failed"),
-        (LastTerminalOutTime, LastTerminalOut) = arg_max(iff(isnotempty(SessionTerminalOut), TimeGenerated, datetime(null)), SessionTerminalOut)
-        by SessionId, PolicyName
-    | extend
-        TargetUsername = coalesce(AuthUsername, SessionUsername),
-        EventResult = case(
-            AuthFailureCount > 0, "Failure",
-            LastTerminalOut =~ "Deny", "Failure",
-            AuthSuccessCount > 0, "Success",
-            LastTerminalOut =~ "Allow", "Success",
-            "NA"
-        )
-    | extend
-        EventResultDetails = case(
-            AuthFailureCount > 0, "Other",
-            LastTerminalOut =~ "Deny", "Logon violates policy",
-            ""
-        ),
-        EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
-        // ASIM EventCount means "how many logon events this record represents" (normally 1),
-        // not "how many raw APM log lines fed the correlation" (that's RawLineCount above,
-        // which can be in the hundreds for a single session and would badly mislead anyone
-        // summing EventCount to count logons).
-        EventCount = 1,
-        LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
-        TargetUsernameType = case(
-            TargetUsername has "\\", "Windows",
-            TargetUsername has "@", "UPN",
-            "Simple"
-        ),
-        TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
-        TargetAppName = PolicyName,
-        LogonTarget = PolicyName,
-        LogonProtocol = "SSL-VPN",
-        EventType = "Logon",
-        EventSubType = "Remote",
-        EventSchema = "Authentication",
-        EventSchemaVersion = "0.1.4",
-        EventVendor = "F5",
-        EventProduct = "BIG-IP APM",
-        EventUid = SessionId,
-        Dst = Dvc,
-        Src = SrcIpAddr,
-        Type = "Syslog"
+    let LogonEvents = RawEvents
+        | summarize
+            EventStartTime = min(TimeGenerated),
+            EventEndTime = max(TimeGenerated),
+            RawLineCount = count(),
+            Dvc = any(Computer),
+            AuthUsername = take_anyif(AuthUsername, isnotempty(AuthUsername)),
+            SessionUsername = take_anyif(SessionUsername, isnotempty(SessionUsername)),
+            AuthSuccessCount = countif(AuthOutcome =~ "successfully"),
+            AuthFailureCount = countif(AuthOutcome =~ "failed"),
+            (LastTerminalOutTime, LastTerminalOut) = arg_max(iff(isnotempty(SessionTerminalOut), TimeGenerated, datetime(null)), SessionTerminalOut)
+            by SessionId, PolicyName
+        | lookup kind=leftouter SessionClientIps on SessionId
+        | extend
+            TargetUsername = coalesce(AuthUsername, SessionUsername),
+            EventResult = case(
+                AuthFailureCount > 0, "Failure",
+                LastTerminalOut =~ "Deny", "Failure",
+                AuthSuccessCount > 0, "Success",
+                LastTerminalOut =~ "Allow", "Success",
+                "NA"
+            )
+        | extend
+            EventResultDetails = case(
+                AuthFailureCount > 0, "Other",
+                LastTerminalOut =~ "Deny", "Logon violates policy",
+                ""
+            ),
+            EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
+            EventCount = 1,
+            LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
+            TargetUsernameType = case(
+                TargetUsername has "\\", "Windows",
+                TargetUsername has "@", "UPN",
+                "Simple"
+            ),
+            TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
+            TargetAppName = PolicyName,
+            LogonTarget = PolicyName,
+            LogonProtocol = "SSL-VPN",
+            EventType = "Logon",
+            EventSubType = "Remote",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.4",
+            EventVendor = "F5",
+            EventProduct = "BIG-IP APM",
+            EventUid = SessionId,
+            Dst = Dvc,
+            Src = SrcIpAddr,
+            Type = "Syslog";
+    let LogoffEvents = SessionEnds
+        | join kind=leftouter (
+            LogonEvents
+            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetAppName, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst
+        ) on SessionId
+        | extend
+            EventStartTime = LogoffTime,
+            EventEndTime = LogoffTime,
+            EventCount = 1,
+            EventType = "Logoff",
+            EventSubType = "Remote",
+            EventResult = "Success",
+            EventResultDetails = case(
+                SessionDeletedReason has_any ("user inactivity", "timeout"), "Session expired",
+                isempty(SessionDeletedReason) or SessionDeletedReason has "user_initiated", "",
+                "Other"
+            ),
+            EventSeverity = "Informational",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.4",
+            EventVendor = "F5",
+            EventProduct = "BIG-IP APM",
+            EventUid = SessionId,
+            LogonProtocol = coalesce(LogonProtocol, "SSL-VPN"),
+            Type = "Syslog";
+    LogonEvents
+    | union LogoffEvents
     | where targetusername_has == "" or TargetUsername has targetusername_has
     | where array_length(srcipaddr_has_any_prefix) == 0 or SrcIpAddr has_any (srcipaddr_has_any_prefix)
     | where array_length(eventresult_in) == 0 or EventResult in (eventresult_in)

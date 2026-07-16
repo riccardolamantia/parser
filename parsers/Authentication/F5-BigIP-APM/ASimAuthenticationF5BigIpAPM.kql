@@ -1,40 +1,60 @@
 // ASIM Authentication parser for F5 BIG-IP APM (Access Policy Manager) syslog events.
-// Source table: Syslog, ProcessName in ("apmd", "authd").
+// Source table: Syslog. Produces two record shapes per correlated session: one
+// EventType="Logon" row and, once the session ends, one EventType="Logoff" row —
+// callers counting/filtering by session should expect up to 2 rows per real session.
 //
 // F5 APM does not emit one syslog line per login — each line reports a single
 // session-variable change or access-policy step. This parser correlates every
 // line that shares the same APM session ID (the 8-hex-char token that always
-// follows ":Common:", e.g. "...:Common:7e365591...") into a single ASIM
-// Authentication record per session. The SessionId is pulled out with a fixed
-// {8} regex rather than "everything up to the next ': '", because some lines
-// invoke a shared macro policy and read "...:Common:<id>:/Common/<macro>: text"
-// — capturing up to the next colon-space there would swallow the macro path
-// into SessionId and split one real session into two correlation groups.
-// Field extraction below runs directly on the raw SyslogMessage (not on a
-// pre-sliced tail) so the same macro-path variant can't break it either.
+// follows ":Common:", e.g. "...:Common:7e365591...") into ASIM Authentication
+// records. The SessionId is pulled out with a fixed {8} regex rather than
+// "everything up to the next ': '", because some lines invoke a shared macro
+// policy and read "...:Common:<id>:/Common/<macro>: text" — capturing up to
+// the next colon-space there would swallow the macro path into SessionId and
+// split one real session into two correlation groups. Field extraction runs
+// directly on the raw SyslogMessage (not on a pre-sliced tail) so the same
+// macro-path variant can't break it either.
 //
-// Built from a sample covering: successful and failed RADIUS auth (msg
-// 01490058, confirmed against a real failed session), the session client IP
-// variable (msg 01490113), the final access-policy outcome (msg 01490115,
-// "terminalout 'Allow'/'Deny'"), and the username variable (msg 01490010).
+// SrcIpAddr comes from "New session from client IP <ip> ... at VIP ... Listener
+// ..." — written when the connection first arrives, before authentication.
+// This line is deliberately matched without the ProcessName filter used below,
+// because (confirmed against a working hand-written parser already in this
+// workspace) it is not reliably logged under apmd/authd like the auth messages
+// are. Using it instead of the 'session.user.clientip' session variable (which
+// is only set *after* a successful logon continues past the logon page) is
+// what gives Success **and** Failure rows a populated SrcIpAddr — the earlier
+// version of this parser could only ever get the IP on successful logons.
 //
-// Confirmed data limitation, not a mapping bug: on a failed logon, APM never
-// sets 'session.user.clientip' (that variable is only written later in the
-// flow, after a successful auth continues past the logon page) — so
-// SrcIpAddr is reliably empty on every Failure row. If you need the source
-// IP for failed attempts too, it isn't in this Syslog stream; correlate by
-// time + TargetUsername against another F5 log (e.g. the LTM/WAF HTTP access
-// log for the VPN portal) instead.
+// Session end / logoff comes from "Session deleted (<reason>)" lines, again
+// matched without a ProcessName restriction for the same reason.
 //
-// The real RADIUS reject only carries a generic "Access-Reject" with no
-// reason code, so EventResultDetails for a Failure is set to "Other" rather
-// than guessing a specific reason (e.g. "Incorrect password") that the
-// source data doesn't actually support.
+// Built from real F5 Snam data covering: successful and failed RADIUS auth
+// (msg 01490058), the final access-policy outcome ("terminalout 'Allow'/
+// 'Deny'"), and the username variable ("Username 'X'"). The RADIUS reject
+// only carries a generic "Access-Reject" with no reason code, so
+// EventResultDetails for a Failure is "Other" rather than a guessed specific
+// reason (e.g. "Incorrect password") the source data doesn't actually support.
 //
 // Sessions run for hours, so a query over a short time range will show many
-// sessions without their logon event (no Success/Failure/Allow/Deny signal
-// yet) — that shows up as EventResult="NA" and is expected, not a bug.
+// sessions without their logon event yet (no Success/Failure/Allow/Deny
+// signal) — that shows up as EventResult="NA" and is expected, not a bug.
 let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
+    let SessionClientIps = Syslog
+        | where not(disabled)
+        | where SyslogMessage has "New session from client IP"
+        | extend
+            SessionId = extract(@":Common:([0-9a-f]{8}):", 1, SyslogMessage),
+            ClientIp = extract(@"New session from client IP (\S+)", 1, SyslogMessage)
+        | where isnotempty(SessionId) and isnotempty(ClientIp)
+        | summarize SrcIpAddr = take_any(ClientIp) by SessionId;
+    let SessionEnds = Syslog
+        | where not(disabled)
+        | where SyslogMessage has "Session deleted"
+        | extend
+            SessionId = extract(@":Common:([0-9a-f]{8}):", 1, SyslogMessage),
+            SessionDeletedReason = extract(@"Session deleted\s*\(([^)]+)\)", 1, SyslogMessage)
+        | where isnotempty(SessionId)
+        | summarize LogoffTime = max(TimeGenerated), Dvc = any(Computer), SessionDeletedReason = take_any(SessionDeletedReason) by SessionId;
     let RawEvents = Syslog
         | where not(disabled)
         | where ProcessName in~ ("apmd", "authd")
@@ -44,63 +64,85 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             AuthUsername = extract(@"authenticate with '([^']+)' (successfully|failed)", 1, SyslogMessage),
             AuthOutcome = extract(@"authenticate with '([^']+)' (successfully|failed)", 2, SyslogMessage),
             SessionUsername = extract(@"Username '([^']+)'$", 1, SyslogMessage),
-            SessionClientIp = extract(@"clientip is (\S+)$", 1, SyslogMessage),
             SessionTerminalOut = extract(@"terminalout '([^']+)'$", 1, SyslogMessage)
         | where isnotempty(SessionId);
-    RawEvents
-    | summarize
-        EventStartTime = min(TimeGenerated),
-        EventEndTime = max(TimeGenerated),
-        RawLineCount = count(),
-        Dvc = any(Computer),
-        AuthUsername = take_anyif(AuthUsername, isnotempty(AuthUsername)),
-        SessionUsername = take_anyif(SessionUsername, isnotempty(SessionUsername)),
-        SrcIpAddr = take_anyif(SessionClientIp, isnotempty(SessionClientIp)),
-        AuthSuccessCount = countif(AuthOutcome =~ "successfully"),
-        AuthFailureCount = countif(AuthOutcome =~ "failed"),
-        (LastTerminalOutTime, LastTerminalOut) = arg_max(iff(isnotempty(SessionTerminalOut), TimeGenerated, datetime(null)), SessionTerminalOut)
-        by SessionId, PolicyName
-    | extend
-        TargetUsername = coalesce(AuthUsername, SessionUsername),
-        EventResult = case(
-            AuthFailureCount > 0, "Failure",
-            LastTerminalOut =~ "Deny", "Failure",
-            AuthSuccessCount > 0, "Success",
-            LastTerminalOut =~ "Allow", "Success",
-            "NA"
-        )
-    | extend
-        EventResultDetails = case(
-            AuthFailureCount > 0, "Other",
-            LastTerminalOut =~ "Deny", "Logon violates policy",
-            ""
-        ),
-        EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
-        // ASIM EventCount means "how many logon events this record represents" (normally 1),
-        // not "how many raw APM log lines fed the correlation" (that's RawLineCount above,
-        // which can be in the hundreds for a single session and would badly mislead anyone
-        // summing EventCount to count logons).
-        EventCount = 1,
-        LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
-        TargetUsernameType = case(
-            TargetUsername has "\\", "Windows",
-            TargetUsername has "@", "UPN",
-            "Simple"
-        ),
-        TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
-        TargetAppName = PolicyName,
-        LogonTarget = PolicyName,
-        LogonProtocol = "SSL-VPN",
-        EventType = "Logon",
-        EventSubType = "Remote",
-        EventSchema = "Authentication",
-        EventSchemaVersion = "0.1.4",
-        EventVendor = "F5",
-        EventProduct = "BIG-IP APM",
-        EventUid = SessionId,
-        Dst = Dvc,
-        Src = SrcIpAddr,
-        Type = "Syslog"
+    let LogonEvents = RawEvents
+        | summarize
+            EventStartTime = min(TimeGenerated),
+            EventEndTime = max(TimeGenerated),
+            RawLineCount = count(),
+            Dvc = any(Computer),
+            AuthUsername = take_anyif(AuthUsername, isnotempty(AuthUsername)),
+            SessionUsername = take_anyif(SessionUsername, isnotempty(SessionUsername)),
+            AuthSuccessCount = countif(AuthOutcome =~ "successfully"),
+            AuthFailureCount = countif(AuthOutcome =~ "failed"),
+            (LastTerminalOutTime, LastTerminalOut) = arg_max(iff(isnotempty(SessionTerminalOut), TimeGenerated, datetime(null)), SessionTerminalOut)
+            by SessionId, PolicyName
+        | lookup kind=leftouter SessionClientIps on SessionId
+        | extend
+            TargetUsername = coalesce(AuthUsername, SessionUsername),
+            EventResult = case(
+                AuthFailureCount > 0, "Failure",
+                LastTerminalOut =~ "Deny", "Failure",
+                AuthSuccessCount > 0, "Success",
+                LastTerminalOut =~ "Allow", "Success",
+                "NA"
+            )
+        | extend
+            EventResultDetails = case(
+                AuthFailureCount > 0, "Other",
+                LastTerminalOut =~ "Deny", "Logon violates policy",
+                ""
+            ),
+            EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
+            EventCount = 1,
+            LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
+            TargetUsernameType = case(
+                TargetUsername has "\\", "Windows",
+                TargetUsername has "@", "UPN",
+                "Simple"
+            ),
+            TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
+            TargetAppName = PolicyName,
+            LogonTarget = PolicyName,
+            LogonProtocol = "SSL-VPN",
+            EventType = "Logon",
+            EventSubType = "Remote",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.4",
+            EventVendor = "F5",
+            EventProduct = "BIG-IP APM",
+            EventUid = SessionId,
+            Dst = Dvc,
+            Src = SrcIpAddr,
+            Type = "Syslog";
+    let LogoffEvents = SessionEnds
+        | join kind=leftouter (
+            LogonEvents
+            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetAppName, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst
+        ) on SessionId
+        | extend
+            EventStartTime = LogoffTime,
+            EventEndTime = LogoffTime,
+            EventCount = 1,
+            EventType = "Logoff",
+            EventSubType = "Remote",
+            EventResult = "Success",
+            EventResultDetails = case(
+                SessionDeletedReason has_any ("user inactivity", "timeout"), "Session expired",
+                isempty(SessionDeletedReason) or SessionDeletedReason has "user_initiated", "",
+                "Other"
+            ),
+            EventSeverity = "Informational",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.4",
+            EventVendor = "F5",
+            EventProduct = "BIG-IP APM",
+            EventUid = SessionId,
+            LogonProtocol = coalesce(LogonProtocol, "SSL-VPN"),
+            Type = "Syslog";
+    LogonEvents
+    | union LogoffEvents
     | project
         TimeGenerated = EventEndTime,
         EventStartTime,
