@@ -6,6 +6,16 @@
 // added. Time filters run before the per-session correlation; the remaining
 // filters run after, since TargetUsername, SrcIpAddr and EventResult only exist
 // once lines for a session have been merged.
+//
+// Confirmed against real data: on a failed logon, APM never sets
+// 'session.user.clientip' (only written later, after a successful auth
+// continues past the logon page) — SrcIpAddr is reliably empty on every
+// Failure row. That's a gap in this Syslog stream, not a mapping bug; if you
+// need the source IP on failed attempts too, correlate by time + TargetUsername
+// against another F5 log (e.g. the LTM/WAF HTTP access log for the VPN portal).
+// Also, the RADIUS reject only carries a generic "Access-Reject" with no reason
+// code, so EventResultDetails for a Failure is "Other" rather than a guessed
+// specific reason the source data doesn't actually support.
 let vimAuthenticationF5BigIpAPM = (
         starttime: datetime = datetime(null),
         endtime: datetime = datetime(null),
@@ -52,7 +62,7 @@ let vimAuthenticationF5BigIpAPM = (
         )
     | extend
         EventResultDetails = case(
-            AuthFailureCount > 0, "Incorrect password",
+            AuthFailureCount > 0, "Other",
             LastTerminalOut =~ "Deny", "Logon violates policy",
             ""
         ),

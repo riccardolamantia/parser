@@ -13,12 +13,24 @@
 // Field extraction below runs directly on the raw SyslogMessage (not on a
 // pre-sliced tail) so the same macro-path variant can't break it either.
 //
-// Built from a sample covering: successful RADIUS auth (msg 01490058), the
-// session client IP variable (msg 01490113), the final access-policy outcome
-// (msg 01490115, "terminalout 'Allow'/'Deny'"), and the username variable
-// (msg 01490010). No genuine failed-login sample was available at authoring
-// time — the "authenticate with 'X' failed" branch and EventResultDetails are
-// best-effort; validate against a real failed logon before relying on them.
+// Built from a sample covering: successful and failed RADIUS auth (msg
+// 01490058, confirmed against a real failed session), the session client IP
+// variable (msg 01490113), the final access-policy outcome (msg 01490115,
+// "terminalout 'Allow'/'Deny'"), and the username variable (msg 01490010).
+//
+// Confirmed data limitation, not a mapping bug: on a failed logon, APM never
+// sets 'session.user.clientip' (that variable is only written later in the
+// flow, after a successful auth continues past the logon page) — so
+// SrcIpAddr is reliably empty on every Failure row. If you need the source
+// IP for failed attempts too, it isn't in this Syslog stream; correlate by
+// time + TargetUsername against another F5 log (e.g. the LTM/WAF HTTP access
+// log for the VPN portal) instead.
+//
+// The real RADIUS reject only carries a generic "Access-Reject" with no
+// reason code, so EventResultDetails for a Failure is set to "Other" rather
+// than guessing a specific reason (e.g. "Incorrect password") that the
+// source data doesn't actually support.
+//
 // Sessions run for hours, so a query over a short time range will show many
 // sessions without their logon event (no Success/Failure/Allow/Deny signal
 // yet) — that shows up as EventResult="NA" and is expected, not a bug.
@@ -59,7 +71,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         )
     | extend
         EventResultDetails = case(
-            AuthFailureCount > 0, "Incorrect password",
+            AuthFailureCount > 0, "Other",
             LastTerminalOut =~ "Deny", "Logon violates policy",
             ""
         ),
