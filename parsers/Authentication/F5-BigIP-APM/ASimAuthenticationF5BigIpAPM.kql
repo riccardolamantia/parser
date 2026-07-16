@@ -116,6 +116,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             EventVendor = "F5",
             EventProduct = "BIG-IP APM",
             EventUid = SessionId,
+            TargetSessionId = SessionId,
             Dst = Dvc,
             Src = SrcIpAddr,
             // HostIP is the F5 device's own IP on the Syslog table; the connector
@@ -158,6 +159,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             EventVendor = "F5",
             EventProduct = "BIG-IP APM",
             EventUid = SessionId,
+            TargetSessionId = SessionId,
             LogonProtocol = coalesce(LogonProtocol, "SSL-VPN"),
             DvcAction = "Allowed",
             Type = "Syslog";
@@ -178,6 +180,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         EventVendor,
         EventProduct,
         EventUid,
+        TargetSessionId,
         Dvc,
         DvcIpAddr,
         DvcHostname,
