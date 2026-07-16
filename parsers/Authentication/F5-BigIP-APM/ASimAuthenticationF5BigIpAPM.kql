@@ -1,0 +1,97 @@
+// ASIM Authentication parser for F5 BIG-IP APM (Access Policy Manager) syslog events.
+// Source table: Syslog, ProcessName in ("apmd", "authd").
+//
+// F5 APM does not emit one syslog line per login — each line reports a single
+// session-variable change or access-policy step. This parser correlates every
+// line that shares the same APM session ID (the hex token between the 2nd and
+// 3rd colon-delimited segments, e.g. "...:Common:7e365591:...") into a single
+// ASIM Authentication record per session.
+//
+// Built from a sample covering: successful RADIUS auth (msg 01490058), the
+// session client IP variable (msg 01490113), the final access-policy outcome
+// (msg 01490115, "terminalout 'Allow'/'Deny'"), and the username variable
+// (msg 01490010). No genuine failed-login sample was available at authoring
+// time — the "authenticate with 'X' failed" branch and EventResultDetails are
+// best-effort; validate against a real failed logon before relying on them.
+let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
+    let RawEvents = Syslog
+        | where not(disabled)
+        | where ProcessName in~ ("apmd", "authd")
+        | parse SyslogMessage with MsgId ":" MsgLevel ": /Common/" PolicyName ":Common:" SessionId ": " MsgText
+        | extend
+            AuthUsername = extract(@"authenticate with '([^']+)' (successfully|failed)", 1, MsgText),
+            AuthOutcome = extract(@"authenticate with '([^']+)' (successfully|failed)", 2, MsgText),
+            SessionUsername = extract(@"^Username '([^']+)'$", 1, MsgText),
+            SessionClientIp = extract(@"clientip is (\S+)$", 1, MsgText),
+            SessionTerminalOut = extract(@"terminalout '([^']+)'$", 1, MsgText);
+    RawEvents
+    | summarize
+        EventStartTime = min(TimeGenerated),
+        EventEndTime = max(TimeGenerated),
+        EventCount = count(),
+        Dvc = any(Computer),
+        AuthUsername = take_anyif(AuthUsername, isnotempty(AuthUsername)),
+        SessionUsername = take_anyif(SessionUsername, isnotempty(SessionUsername)),
+        SrcIpAddr = take_anyif(SessionClientIp, isnotempty(SessionClientIp)),
+        AuthSuccessCount = countif(AuthOutcome =~ "successfully"),
+        AuthFailureCount = countif(AuthOutcome =~ "failed"),
+        (LastTerminalOutTime, LastTerminalOut) = arg_max(iff(isnotempty(SessionTerminalOut), TimeGenerated, datetime(null)), SessionTerminalOut)
+        by SessionId, PolicyName
+    | extend
+        TargetUsername = coalesce(AuthUsername, SessionUsername),
+        EventResult = case(
+            AuthFailureCount > 0, "Failure",
+            LastTerminalOut =~ "Deny", "Failure",
+            AuthSuccessCount > 0, "Success",
+            LastTerminalOut =~ "Allow", "Success",
+            "NA"
+        )
+    | extend
+        EventResultDetails = case(
+            AuthFailureCount > 0, "Incorrect password",
+            LastTerminalOut =~ "Deny", "Logon violates policy",
+            ""
+        ),
+        EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
+        LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
+        TargetUsernameType = "Simple",
+        TargetAppName = PolicyName,
+        LogonTarget = PolicyName,
+        LogonProtocol = "SSL-VPN",
+        EventType = "Logon",
+        EventSubType = "Remote",
+        EventSchema = "Authentication",
+        EventSchemaVersion = "0.1.4",
+        EventVendor = "F5",
+        EventProduct = "BIG-IP APM",
+        EventUid = SessionId,
+        Dst = Dvc,
+        Src = SrcIpAddr,
+        Type = "Syslog"
+    | project
+        TimeGenerated = EventEndTime,
+        EventStartTime,
+        EventEndTime,
+        EventCount,
+        EventType,
+        EventSubType,
+        EventResult,
+        EventResultDetails,
+        EventSeverity,
+        EventSchema,
+        EventSchemaVersion,
+        EventVendor,
+        EventProduct,
+        EventUid,
+        Dvc,
+        Dst,
+        TargetUsername,
+        TargetUsernameType,
+        TargetAppName,
+        LogonTarget,
+        LogonProtocol,
+        LogonMethod,
+        SrcIpAddr,
+        Src,
+        Type
+};
