@@ -72,6 +72,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             EventEndTime = max(TimeGenerated),
             RawLineCount = count(),
             Dvc = any(Computer),
+            RawHostIp = any(HostIP),
             AuthUsername = take_anyif(AuthUsername, isnotempty(AuthUsername)),
             SessionUsername = take_anyif(SessionUsername, isnotempty(SessionUsername)),
             AuthSuccessCount = countif(AuthOutcome =~ "successfully"),
@@ -95,7 +96,9 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
                 ""
             ),
             EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
-            EventCount = 1,
+            // ASIM EventCount is typed `int`; an untyped literal like `1` is inferred
+            // as `long` by KQL and fails schema validation, so cast explicitly.
+            EventCount = toint(1),
             LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
             TargetUsernameType = case(
                 TargetUsername has "\\", "Windows",
@@ -115,6 +118,14 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             EventUid = SessionId,
             Dst = Dvc,
             Src = SrcIpAddr,
+            // HostIP is the F5 device's own IP on the Syslog table; the connector
+            // sometimes reports it as the literal string "Unknown IP" instead of
+            // leaving it empty, which needs filtering out explicitly.
+            DvcIpAddr = iff(RawHostIp == "Unknown IP", "", RawHostIp),
+            DvcHostname = Dvc,
+            TargetHostname = Dvc,
+            DvcDomain = extract(@"^[^.]+\.(.+)$", 1, Dvc),
+            DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
             Type = "Syslog";
     // Inner join, and only against successful logons: "Session deleted" fires for
     // ANY abandoned session object, including ones whose logon attempt failed or
@@ -127,12 +138,12 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         | join kind=inner (
             LogonEvents
             | where EventResult == "Success"
-            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetAppName, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst
+            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetAppName, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
         ) on SessionId
         | extend
             EventStartTime = LogoffTime,
             EventEndTime = LogoffTime,
-            EventCount = 1,
+            EventCount = toint(1),
             EventType = "Logoff",
             EventSubType = "Remote",
             EventResult = "Success",
@@ -148,6 +159,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             EventProduct = "BIG-IP APM",
             EventUid = SessionId,
             LogonProtocol = coalesce(LogonProtocol, "SSL-VPN"),
+            DvcAction = "Allowed",
             Type = "Syslog";
     LogonEvents
     | union LogoffEvents
@@ -167,10 +179,15 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         EventProduct,
         EventUid,
         Dvc,
+        DvcIpAddr,
+        DvcHostname,
+        DvcDomain,
+        DvcAction,
         Dst,
         TargetUsername,
         TargetUsernameType,
         TargetDomain,
+        TargetHostname,
         TargetAppName,
         LogonTarget,
         LogonProtocol,
