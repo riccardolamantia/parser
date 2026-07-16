@@ -1,0 +1,82 @@
+// ASIM Authentication parser for CyberArk Vault (PAS) CEF/CommonSecurityLog events.
+// Source table: CommonSecurityLog, DeviceVendor "Cyber-Ark", DeviceProduct "Vault".
+//
+// Unlike F5 APM, one CommonSecurityLog row here is already one complete event —
+// no multi-line correlation needed. The Vault emits ~27 distinct Activity values
+// (password retrieval, PSM session recording, CPM password rotation, etc.); only
+// three are actual Authentication-schema events, found by inspecting real samples:
+//   - Activity == "Logon"                        -> successful login to the Vault
+//   - Activity == "Logoff"                        -> logout from the Vault
+//   - Activity == "Failure: User Authentication"  -> failed login
+// CyberArk consistently prefixes failed operations with "Failure: ", which is
+// used generically to derive EventResult.
+//
+// The failure event carries no specific reason code (Message is just "Failure: "
+// plus a stray control character in the sample data), so EventResultDetails for
+// a Failure is "Other" rather than a guessed specific reason the source data
+// doesn't support - same honesty rule applied to the F5 parser.
+//
+// SourceTranslatedAddress (not SourceIP, which is empty in this environment's
+// data) carries the real client IP for this connector's field mapping.
+let ASimAuthenticationCyberArkVault = (disabled: bool = false) {
+    CommonSecurityLog
+    | where not(disabled)
+    | where DeviceVendor == "Cyber-Ark" and DeviceProduct == "Vault"
+    | where Activity in ("Logon", "Logoff", "Failure: User Authentication")
+    | extend
+        EventType = iff(Activity == "Logoff", "Logoff", "Logon"),
+        EventResult = iff(Activity startswith "Failure:", "Failure", "Success")
+    | extend
+        EventResultDetails = iff(EventResult == "Failure", "Other", ""),
+        EventSeverity = iff(EventResult == "Failure", "Low", "Informational"),
+        TargetUsername = SourceUserName,
+        SrcIpAddr = coalesce(SourceIP, SourceTranslatedAddress),
+        DvcIpAddr = DeviceAddress
+    | extend
+        TargetUsernameType = case(
+            TargetUsername has "\\", "Windows",
+            TargetUsername has "@", "UPN",
+            "Simple"
+        ),
+        Dvc = coalesce(Computer, DvcIpAddr),
+        TargetAppName = "CyberArk Vault",
+        LogonTarget = "CyberArk Vault",
+        EventUid = _ResourceId,
+        EventCount = 1,
+        EventStartTime = TimeGenerated,
+        EventEndTime = TimeGenerated,
+        EventSchema = "Authentication",
+        EventSchemaVersion = "0.1.4",
+        EventVendor = "CyberArk",
+        EventProduct = "Vault",
+        EventSubType = "Remote",
+        Type = "CommonSecurityLog"
+    | extend
+        Dst = Dvc,
+        Src = SrcIpAddr
+    | project
+        TimeGenerated,
+        EventStartTime,
+        EventEndTime,
+        EventCount,
+        EventType,
+        EventSubType,
+        EventResult,
+        EventResultDetails,
+        EventSeverity,
+        EventSchema,
+        EventSchemaVersion,
+        EventVendor,
+        EventProduct,
+        EventUid,
+        Dvc,
+        DvcIpAddr,
+        Dst,
+        TargetUsername,
+        TargetUsernameType,
+        TargetAppName,
+        LogonTarget,
+        SrcIpAddr,
+        Src,
+        Type
+};
