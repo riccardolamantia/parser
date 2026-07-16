@@ -65,7 +65,12 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         ),
         EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
         LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
-        TargetUsernameType = "Simple",
+        TargetUsernameType = case(
+            TargetUsername has "\\", "Windows",
+            TargetUsername has "@", "UPN",
+            "Simple"
+        ),
+        TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
         TargetAppName = PolicyName,
         LogonTarget = PolicyName,
         LogonProtocol = "SSL-VPN",
@@ -98,6 +103,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         Dst,
         TargetUsername,
         TargetUsernameType,
+        TargetDomain,
         TargetAppName,
         LogonTarget,
         LogonProtocol,
