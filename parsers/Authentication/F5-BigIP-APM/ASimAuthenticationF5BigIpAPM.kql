@@ -51,7 +51,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
     | summarize
         EventStartTime = min(TimeGenerated),
         EventEndTime = max(TimeGenerated),
-        EventCount = count(),
+        RawLineCount = count(),
         Dvc = any(Computer),
         AuthUsername = take_anyif(AuthUsername, isnotempty(AuthUsername)),
         SessionUsername = take_anyif(SessionUsername, isnotempty(SessionUsername)),
@@ -76,6 +76,11 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             ""
         ),
         EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
+        // ASIM EventCount means "how many logon events this record represents" (normally 1),
+        // not "how many raw APM log lines fed the correlation" (that's RawLineCount above,
+        // which can be in the hundreds for a single session and would badly mislead anyone
+        // summing EventCount to count logons).
+        EventCount = 1,
         LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
         TargetUsernameType = case(
             TargetUsername has "\\", "Windows",
