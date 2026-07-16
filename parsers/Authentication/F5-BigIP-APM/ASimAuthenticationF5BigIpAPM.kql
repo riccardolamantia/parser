@@ -3,9 +3,15 @@
 //
 // F5 APM does not emit one syslog line per login — each line reports a single
 // session-variable change or access-policy step. This parser correlates every
-// line that shares the same APM session ID (the hex token between the 2nd and
-// 3rd colon-delimited segments, e.g. "...:Common:7e365591:...") into a single
-// ASIM Authentication record per session.
+// line that shares the same APM session ID (the 8-hex-char token that always
+// follows ":Common:", e.g. "...:Common:7e365591...") into a single ASIM
+// Authentication record per session. The SessionId is pulled out with a fixed
+// {8} regex rather than "everything up to the next ': '", because some lines
+// invoke a shared macro policy and read "...:Common:<id>:/Common/<macro>: text"
+// — capturing up to the next colon-space there would swallow the macro path
+// into SessionId and split one real session into two correlation groups.
+// Field extraction below runs directly on the raw SyslogMessage (not on a
+// pre-sliced tail) so the same macro-path variant can't break it either.
 //
 // Built from a sample covering: successful RADIUS auth (msg 01490058), the
 // session client IP variable (msg 01490113), the final access-policy outcome
@@ -13,17 +19,22 @@
 // (msg 01490010). No genuine failed-login sample was available at authoring
 // time — the "authenticate with 'X' failed" branch and EventResultDetails are
 // best-effort; validate against a real failed logon before relying on them.
+// Sessions run for hours, so a query over a short time range will show many
+// sessions without their logon event (no Success/Failure/Allow/Deny signal
+// yet) — that shows up as EventResult="NA" and is expected, not a bug.
 let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
     let RawEvents = Syslog
         | where not(disabled)
         | where ProcessName in~ ("apmd", "authd")
-        | parse SyslogMessage with MsgId ":" MsgLevel ": /Common/" PolicyName ":Common:" SessionId ": " MsgText
         | extend
-            AuthUsername = extract(@"authenticate with '([^']+)' (successfully|failed)", 1, MsgText),
-            AuthOutcome = extract(@"authenticate with '([^']+)' (successfully|failed)", 2, MsgText),
-            SessionUsername = extract(@"^Username '([^']+)'$", 1, MsgText),
-            SessionClientIp = extract(@"clientip is (\S+)$", 1, MsgText),
-            SessionTerminalOut = extract(@"terminalout '([^']+)'$", 1, MsgText);
+            PolicyName = extract(@"/Common/([^:]+):Common:", 1, SyslogMessage),
+            SessionId = extract(@":Common:([0-9a-f]{8})", 1, SyslogMessage),
+            AuthUsername = extract(@"authenticate with '([^']+)' (successfully|failed)", 1, SyslogMessage),
+            AuthOutcome = extract(@"authenticate with '([^']+)' (successfully|failed)", 2, SyslogMessage),
+            SessionUsername = extract(@"Username '([^']+)'$", 1, SyslogMessage),
+            SessionClientIp = extract(@"clientip is (\S+)$", 1, SyslogMessage),
+            SessionTerminalOut = extract(@"terminalout '([^']+)'$", 1, SyslogMessage)
+        | where isnotempty(SessionId);
     RawEvents
     | summarize
         EventStartTime = min(TimeGenerated),

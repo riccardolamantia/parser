@@ -1,8 +1,11 @@
 // Parameterized (vim) variant of ASimAuthenticationF5BigIpAPM.
-// Same session-correlation logic (see ASimAuthenticationF5BigIpAPM.kql for details),
-// with standard ASIM filtering parameters added. Time filters run before the
-// per-session correlation; the remaining filters run after, since TargetUsername,
-// SrcIpAddr and EventResult only exist once lines for a session have been merged.
+// Same session-correlation logic (see ASimAuthenticationF5BigIpAPM.kql for details,
+// including why SessionId is a fixed {8}-hex regex rather than "up to the next ': '"
+// — some lines invoke a shared macro policy and would otherwise split one real
+// session into two correlation groups), with standard ASIM filtering parameters
+// added. Time filters run before the per-session correlation; the remaining
+// filters run after, since TargetUsername, SrcIpAddr and EventResult only exist
+// once lines for a session have been merged.
 let vimAuthenticationF5BigIpAPM = (
         starttime: datetime = datetime(null),
         endtime: datetime = datetime(null),
@@ -16,13 +19,15 @@ let vimAuthenticationF5BigIpAPM = (
         | where isnull(starttime) or TimeGenerated >= starttime
         | where isnull(endtime) or TimeGenerated <= endtime
         | where ProcessName in~ ("apmd", "authd")
-        | parse SyslogMessage with MsgId ":" MsgLevel ": /Common/" PolicyName ":Common:" SessionId ": " MsgText
         | extend
-            AuthUsername = extract(@"authenticate with '([^']+)' (successfully|failed)", 1, MsgText),
-            AuthOutcome = extract(@"authenticate with '([^']+)' (successfully|failed)", 2, MsgText),
-            SessionUsername = extract(@"^Username '([^']+)'$", 1, MsgText),
-            SessionClientIp = extract(@"clientip is (\S+)$", 1, MsgText),
-            SessionTerminalOut = extract(@"terminalout '([^']+)'$", 1, MsgText);
+            PolicyName = extract(@"/Common/([^:]+):Common:", 1, SyslogMessage),
+            SessionId = extract(@":Common:([0-9a-f]{8})", 1, SyslogMessage),
+            AuthUsername = extract(@"authenticate with '([^']+)' (successfully|failed)", 1, SyslogMessage),
+            AuthOutcome = extract(@"authenticate with '([^']+)' (successfully|failed)", 2, SyslogMessage),
+            SessionUsername = extract(@"Username '([^']+)'$", 1, SyslogMessage),
+            SessionClientIp = extract(@"clientip is (\S+)$", 1, SyslogMessage),
+            SessionTerminalOut = extract(@"terminalout '([^']+)'$", 1, SyslogMessage)
+        | where isnotempty(SessionId);
     RawEvents
     | summarize
         EventStartTime = min(TimeGenerated),
