@@ -554,6 +554,52 @@
           {
             "type": 1,
             "content": {
+              "json": "### Self password change — verifica origine\nI record `Self password change` (EventID 4723, Subject==Target su account `userpim-`/`iusrpim-`/`cusrpim-`) sono per lo più il CPM che si autentica con la password corrente e la cambia — non un umano. La tabella sotto risolve, per `SubjectLogonId`, l'host di origine reale della sessione (join deterministico su `TargetLogonId` dell'evento 4624 corrispondente) e lo confronta con i server CPM noti. Validato su 30 giorni: 0 casi SCONOSCIUTO su 3047 self-change risolti; il residuo non risolvibile (~1.3%) sono sessioni persistenti aperte prima della finestra di lookback, non un'assenza di log."
+            },
+            "name": "self-change-origin-title"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let KnownCPMWorkstations = dynamic([\"SNSRP03873\", \"SNSRB01596\", \"SPSVP00671\", \"SNSRB01618\", \"SNSRB01614\", \"SNSRB01606\", \"SNSRB01701\"]);\nlet SelfChanges = SecurityEvent\n| where TimeGenerated >= {TimeRange:start}\n| where EventID == 4723\n| where SubjectUserName contains \"pim-\"\n| where tolower(SubjectUserName) == tolower(TargetUserName)\n| extend TargetAccount = iff(isnotempty(TargetDomainName), strcat(TargetDomainName, \"/\", TargetUserName), TargetUserName)\n| project ChangeTime = TimeGenerated, Computer, TargetAccount, SubjectLogonId;\nlet Logons = SecurityEvent\n| where TimeGenerated >= {TimeRange:start}\n| where EventID == 4624\n| project Computer, TargetLogonId, WorkstationName;\nSelfChanges\n| join kind=leftouter (Logons) on Computer, $left.SubjectLogonId == $right.TargetLogonId\n| extend Origin = case(\n    isempty(WorkstationName), \"Sessione non risolvibile (probabile sessione persistente pre-finestra)\",\n    WorkstationName in (KnownCPMWorkstations), \"CPM noto\",\n    \"SCONOSCIUTO - verificare\")\n| summarize Events = count(), FirstSeen = min(ChangeTime), LastSeen = max(ChangeTime) by Origin, WorkstationName\n| order by Origin asc, Events desc",
+              "size": 0,
+              "title": "Self password change by origin workstation",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "table"
+            },
+            "customWidth": "50",
+            "name": "self-change-origin-table",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let KnownCPMWorkstations = dynamic([\"SNSRP03873\", \"SNSRB01596\", \"SPSVP00671\", \"SNSRB01618\", \"SNSRB01614\", \"SNSRB01606\", \"SNSRB01701\"]);\nlet SelfChanges = SecurityEvent\n| where TimeGenerated >= {TimeRange:start}\n| where EventID == 4723\n| where SubjectUserName contains \"pim-\"\n| where tolower(SubjectUserName) == tolower(TargetUserName)\n| extend TargetAccount = iff(isnotempty(TargetDomainName), strcat(TargetDomainName, \"/\", TargetUserName), TargetUserName)\n| project ChangeTime = TimeGenerated, Computer, TargetAccount, SubjectLogonId;\nlet Logons = SecurityEvent\n| where TimeGenerated >= {TimeRange:start}\n| where EventID == 4624\n| project Computer, TargetLogonId, WorkstationName;\nSelfChanges\n| join kind=leftouter (Logons) on Computer, $left.SubjectLogonId == $right.TargetLogonId\n| extend Origin = case(\n    isempty(WorkstationName), \"Sessione non risolvibile (probabile sessione persistente pre-finestra)\",\n    WorkstationName in (KnownCPMWorkstations), \"CPM noto\",\n    \"SCONOSCIUTO - verificare\")\n| where Origin == \"SCONOSCIUTO - verificare\"\n| project ChangeTime, Computer, TargetAccount, SubjectLogonId, WorkstationName\n| order by ChangeTime desc",
+              "size": 0,
+              "title": "Self password change - unknown origin (needs review)",
+              "noDataMessage": "No data found - nessun self-change da origine sconosciuta nel periodo selezionato.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "customWidth": "50",
+            "name": "self-change-unknown-origin",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 1,
+            "content": {
               "json": "## 🔐 CyberArk CPM password management errors\nThis section monitors CyberArk CPM password management failures, including `CPM Change Password Failed` on impacted shared accounts.\n\n**Verify Password Failures (Code 2114) baseline** — validated against 30 days of production data: most `VerificationPeriod`-triggered failures trace back to CyberArk's own reconciliation actors (`recon`, `pimgate`, `cyberarklogon`) or bulk password-rotation waves, not external/unauthorized changes. Only `ImmediateTask`-triggered failures (real credential usage) warrant per-case investigation — see the Priority Baseline table below."
             },
             "name": "cpm-section-title"
