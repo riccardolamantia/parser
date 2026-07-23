@@ -1,0 +1,710 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# [TEST] - To Validate - CyberArk Monitoring\n\nTwo-page workbook: **CyberArk Show Password Monitoring** and **Password Change / Reset Monitoring**."
+      },
+      "name": "intro"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "55074614-5e8c-47ed-a974-c2147e4dd3d5",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "label": "🕒 Time range",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 604800000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 43200000
+                },
+                {
+                  "durationMs": 86400000
+                },
+                {
+                  "durationMs": 172800000
+                },
+                {
+                  "durationMs": 604800000
+                },
+                {
+                  "durationMs": 1209600000
+                },
+                {
+                  "durationMs": 2592000000
+                },
+                {
+                  "durationMs": 5184000000
+                },
+                {
+                  "durationMs": 7776000000
+                }
+              ],
+              "allowCustom": true
+            },
+            "timeContext": {
+              "durationMs": 86400000
+            }
+          },
+          {
+            "id": "fa3f392b-a83f-4fb7-8e84-ab53c80fc689",
+            "version": "KqlParameterItem/1.0",
+            "name": "ExcludedSharedAccounts",
+            "label": "🚫 Shared accounts to exclude",
+            "type": 2,
+            "isRequired": true,
+            "multiSelect": true,
+            "quote": "'",
+            "delimiter": ",",
+            "query": "datatable(value:string, label:string)\n[\n    \"__none__\", \"No exclusion\"\n]\n| union (\n    CommonSecurityLog\n    | where TimeGenerated >= {TimeRange:start}\n    | where DeviceVendor =~ \"Cyber-Ark\"\n    | where DeviceProduct =~ \"Vault\"\n    | where tostring(DeviceEventClassID) == \"295\"\n    | extend ActorUser = tostring(SourceUserName)\n    | extend EventType = case(\n        ActorUser contains \"PasswordManager\"\n            or ActorUser contains \"NotificationEngine\"\n            or ActorUser contains \"PSM\"\n            or ActorUser contains \"PVWA\"\n            or ActorUser contains \"AIM\"\n            or ActorUser contains \"Provider\"\n            or ActorUser contains \"AppProvider\"\n            or ActorUser contains \"CyberarkAccountsIntegration\",\n            \"CyberArk Component\",\n        ActorUser startswith \"Prov_\", \"Application / Provider\",\n        isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n        \"Human / Nominal User\")\n    | extend SharedAccount = tostring(DestinationUserName)\n    | where EventType == \"Human / Nominal User\"\n    | where isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\")\n    | summarize Events = count() by SharedAccount\n    | order by Events desc\n    | project value = SharedAccount, label = strcat(SharedAccount, \" - \", Events, \" events\")\n)",
+            "value": [
+              "__none__"
+            ],
+            "typeSettings": {
+              "additionalResourceOptions": [],
+              "showDefault": false
+            },
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "timeContextFromParameter": "TimeRange",
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces"
+          },
+          {
+            "id": "7774b0ae-2b75-4914-8cde-a573be153f8e",
+            "version": "KqlParameterItem/1.0",
+            "name": "MainTab",
+            "type": 1,
+            "isRequired": true,
+            "value": "PasswordEvents",
+            "isHiddenWhenLocked": true,
+            "timeContext": {
+              "durationMs": 86400000
+            }
+          }
+        ],
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "parameters-time"
+    },
+    {
+      "type": 11,
+      "content": {
+        "version": "LinkItem/1.0",
+        "style": "tabs",
+        "links": [
+          {
+            "id": "bbbd991f-6c4a-45ce-b966-887103fada0d",
+            "cellValue": "MainTab",
+            "linkTarget": "parameter",
+            "linkLabel": "🔐 CyberArk Show Password Monitoring",
+            "subTarget": "CyberArkMonitoring",
+            "style": "link"
+          },
+          {
+            "id": "67134493-dfb1-4b65-8ce2-21a4d0bba8db",
+            "cellValue": "MainTab",
+            "linkTarget": "parameter",
+            "linkLabel": "🔁 Password Change / Reset Monitoring",
+            "subTarget": "PasswordEvents",
+            "style": "link"
+          }
+        ]
+      },
+      "name": "main-tabs"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## 🔐 CyberArk Show Password / Retrieve Password Monitoring\nThis page monitors Vault audit code `295` / `Retrieve Password`. "
+            },
+            "name": "cy-title"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkPasswordRetrievals = CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"295\"\n| extend ActorUser = tostring(SourceUserName)\n| extend EventType = case(\n    ActorUser contains \"PasswordManager\" or ActorUser contains \"NotificationEngine\" or ActorUser contains \"PSM\" or ActorUser contains \"PVWA\" or ActorUser contains \"AIM\" or ActorUser contains \"Provider\" or ActorUser contains \"AppProvider\" or ActorUser contains \"CyberarkAccountsIntegration\", \"CyberArk Component\",\n    ActorUser startswith \"Prov_\", \"Application / Provider\",\n    isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n    \"Human / Nominal User\")\n| extend SharedAccount = tostring(DestinationUserName)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend AccountName = tostring(SourceUserName)\n| extend SharedAccountLower = tolower(SharedAccount)\n| extend SafeLower = tolower(Safe)\n| extend SharedAccountCategory = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Utenza automation / sistema\",\n    SafeLower contains \"ut-general\", \"Utenza tecnica\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Utenza privilegiata / Shared PIM\",\n    \"Unknown / Not mapped\")\n| extend SharedAccountCategoryReason = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Known automation/system account\",\n    SafeLower contains \"ut-general\", \"Safe / Platform UT-General\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Default privileged/shared PIM account\",\n    \"Missing or unmapped shared account\")\n| extend ClientSource = case(isnotempty(tostring(SourceIP)), tostring(SourceIP), isnotempty(tostring(SourceHostName)), tostring(SourceHostName), isnotempty(tostring(DeviceAddress)), tostring(DeviceAddress), isnotempty(tostring(Computer)), tostring(Computer), \"Unknown\")\n| extend SafeLabel = iff(strlen(Safe) > 38, strcat(substring(Safe, 0, 38), \"...\"), Safe)\n| extend AccountSafeFullName = strcat(SharedAccount, \" | \", Safe)\n| extend AccountSafeLabel = strcat(iff(strlen(SharedAccount) > 30, strcat(substring(SharedAccount, 0, 30), \"...\"), SharedAccount), \" | \", iff(strlen(Safe) > 25, strcat(substring(Safe, 0, 25), \"...\"), Safe));\nCyberArkPasswordRetrievals\n| summarize Events=count() by bin(TimeGenerated, 1d), EventType\n| order by TimeGenerated asc",
+              "size": 1,
+              "title": "Overall password retrieval trend by EventType",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart"
+            },
+            "name": "overall-eventtype-trend",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkPasswordRetrievals = CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"295\"\n| extend ActorUser = tostring(SourceUserName)\n| extend EventType = case(\n    ActorUser contains \"PasswordManager\" or ActorUser contains \"NotificationEngine\" or ActorUser contains \"PSM\" or ActorUser contains \"PVWA\" or ActorUser contains \"AIM\" or ActorUser contains \"Provider\" or ActorUser contains \"AppProvider\" or ActorUser contains \"CyberarkAccountsIntegration\", \"CyberArk Component\",\n    ActorUser startswith \"Prov_\", \"Application / Provider\",\n    isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n    \"Human / Nominal User\")\n| extend SharedAccount = tostring(DestinationUserName)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend AccountName = tostring(SourceUserName)\n| extend SharedAccountLower = tolower(SharedAccount)\n| extend SafeLower = tolower(Safe)\n| extend SharedAccountCategory = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Utenza automation / sistema\",\n    SafeLower contains \"ut-general\", \"Utenza tecnica\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Utenza privilegiata / Shared PIM\",\n    \"Unknown / Not mapped\")\n| extend SharedAccountCategoryReason = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Known automation/system account\",\n    SafeLower contains \"ut-general\", \"Safe / Platform UT-General\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Default privileged/shared PIM account\",\n    \"Missing or unmapped shared account\")\n| extend ClientSource = case(isnotempty(tostring(SourceIP)), tostring(SourceIP), isnotempty(tostring(SourceHostName)), tostring(SourceHostName), isnotempty(tostring(DeviceAddress)), tostring(DeviceAddress), isnotempty(tostring(Computer)), tostring(Computer), \"Unknown\")\n| extend SafeLabel = iff(strlen(Safe) > 38, strcat(substring(Safe, 0, 38), \"...\"), Safe)\n| extend AccountSafeFullName = strcat(SharedAccount, \" | \", Safe)\n| extend AccountSafeLabel = strcat(iff(strlen(SharedAccount) > 30, strcat(substring(SharedAccount, 0, 30), \"...\"), SharedAccount), \" | \", iff(strlen(Safe) > 25, strcat(substring(Safe, 0, 25), \"...\"), Safe));\nlet HumanEvents = CyberArkPasswordRetrievals\n| where EventType == \"Human / Nominal User\"\n| where \"__none__\" in~ ({ExcludedSharedAccounts}) or SharedAccount !in~ ({ExcludedSharedAccounts});\nunion\n(HumanEvents | summarize Value=count() | extend Metric=\"🔐 Human retrieval events\", SortOrder=1),\n(HumanEvents | summarize Value=dcount(ActorUser) | extend Metric=\"👤 Distinct human users\", SortOrder=2),\n(HumanEvents | summarize Value=dcount(Safe) | extend Metric=\"🗄️ Distinct safes\", SortOrder=3),\n(HumanEvents | summarize Value=dcount(SharedAccount) | extend Metric=\"🔑 Distinct accounts\", SortOrder=4),\n(HumanEvents | summarize Value=dcount(ClientSource) | extend Metric=\"🌐 Distinct client sources\", SortOrder=5)\n| order by SortOrder asc\n| project Metric, Value",
+              "size": 1,
+              "title": "Human / nominal user KPI summary",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "tiles",
+              "tileSettings": {
+                "showBorder": false,
+                "titleContent": {
+                  "columnMatch": "Metric",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "auto"
+                  },
+                  "numberFormat": {
+                    "unit": 17,
+                    "options": {
+                      "maximumSignificantDigits": 3,
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                }
+              }
+            },
+            "name": "human-kpi-tiles",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkPasswordRetrievals = CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"295\"\n| extend ActorUser = tostring(SourceUserName)\n| extend EventType = case(\n    ActorUser contains \"PasswordManager\" or ActorUser contains \"NotificationEngine\" or ActorUser contains \"PSM\" or ActorUser contains \"PVWA\" or ActorUser contains \"AIM\" or ActorUser contains \"Provider\" or ActorUser contains \"AppProvider\" or ActorUser contains \"CyberarkAccountsIntegration\", \"CyberArk Component\",\n    ActorUser startswith \"Prov_\", \"Application / Provider\",\n    isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n    \"Human / Nominal User\")\n| extend SharedAccount = tostring(DestinationUserName)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend AccountName = tostring(SourceUserName)\n| extend SharedAccountLower = tolower(SharedAccount)\n| extend SafeLower = tolower(Safe)\n| extend SharedAccountCategory = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Utenza automation / sistema\",\n    SafeLower contains \"ut-general\", \"Utenza tecnica\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Utenza privilegiata / Shared PIM\",\n    \"Unknown / Not mapped\")\n| extend SharedAccountCategoryReason = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Known automation/system account\",\n    SafeLower contains \"ut-general\", \"Safe / Platform UT-General\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Default privileged/shared PIM account\",\n    \"Missing or unmapped shared account\")\n| extend ClientSource = case(isnotempty(tostring(SourceIP)), tostring(SourceIP), isnotempty(tostring(SourceHostName)), tostring(SourceHostName), isnotempty(tostring(DeviceAddress)), tostring(DeviceAddress), isnotempty(tostring(Computer)), tostring(Computer), \"Unknown\")\n| extend SafeLabel = iff(strlen(Safe) > 38, strcat(substring(Safe, 0, 38), \"...\"), Safe)\n| extend AccountSafeFullName = strcat(SharedAccount, \" | \", Safe)\n| extend AccountSafeLabel = strcat(iff(strlen(SharedAccount) > 30, strcat(substring(SharedAccount, 0, 30), \"...\"), SharedAccount), \" | \", iff(strlen(Safe) > 25, strcat(substring(Safe, 0, 25), \"...\"), Safe));\nlet HumanEvents = CyberArkPasswordRetrievals\n| where EventType == \"Human / Nominal User\"\n| where \"__none__\" in~ ({ExcludedSharedAccounts}) or SharedAccount !in~ ({ExcludedSharedAccounts})\n| where isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\");\nunion\n(HumanEvents | summarize Value=countif(SharedAccountCategory == \"Utenza privilegiata / Shared PIM\") | extend Metric=\"🔵 Privileged / Shared PIM retrievals\", SortOrder=1),\n(HumanEvents | summarize Value=countif(SharedAccountCategory == \"Utenza tecnica\") | extend Metric=\"🛠️ Technical retrievals\", SortOrder=2),\n(HumanEvents | summarize Value=countif(SharedAccountCategory == \"Utenza automation / sistema\") | extend Metric=\"⚙️ Automation/system retrievals\", SortOrder=3),\n(HumanEvents | summarize Value=dcountif(SharedAccount, SharedAccountCategory == \"Utenza privilegiata / Shared PIM\") | extend Metric=\"🎯 Distinct privileged accounts\", SortOrder=4),\n(HumanEvents | summarize Value=dcountif(SharedAccount, SharedAccountCategory == \"Utenza tecnica\") | extend Metric=\"🛠️ Distinct technical accounts\", SortOrder=5),\n(HumanEvents | summarize Value=dcountif(SharedAccount, SharedAccountCategory == \"Utenza automation / sistema\") | extend Metric=\"⚙️ Distinct automation accounts\", SortOrder=6)\n| order by SortOrder asc\n| project Metric, Value",
+              "size": 1,
+              "title": "Shared account category KPI summary",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "tiles",
+              "tileSettings": {
+                "showBorder": false,
+                "titleContent": {
+                  "columnMatch": "Metric",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "auto"
+                  },
+                  "numberFormat": {
+                    "unit": 17,
+                    "options": {
+                      "maximumSignificantDigits": 3,
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                }
+              }
+            },
+            "name": "shared-category-kpi-tiles",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkPasswordRetrievals = CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"295\"\n| extend ActorUser = tostring(SourceUserName)\n| extend EventType = case(\n    ActorUser contains \"PasswordManager\" or ActorUser contains \"NotificationEngine\" or ActorUser contains \"PSM\" or ActorUser contains \"PVWA\" or ActorUser contains \"AIM\" or ActorUser contains \"Provider\" or ActorUser contains \"AppProvider\" or ActorUser contains \"CyberarkAccountsIntegration\", \"CyberArk Component\",\n    ActorUser startswith \"Prov_\", \"Application / Provider\",\n    isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n    \"Human / Nominal User\")\n| extend SharedAccount = tostring(DestinationUserName)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend AccountName = tostring(SourceUserName)\n| extend SharedAccountLower = tolower(SharedAccount)\n| extend SafeLower = tolower(Safe)\n| extend SharedAccountCategory = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Utenza automation / sistema\",\n    SafeLower contains \"ut-general\", \"Utenza tecnica\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Utenza privilegiata / Shared PIM\",\n    \"Unknown / Not mapped\")\n| extend SharedAccountCategoryReason = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Known automation/system account\",\n    SafeLower contains \"ut-general\", \"Safe / Platform UT-General\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Default privileged/shared PIM account\",\n    \"Missing or unmapped shared account\")\n| extend ClientSource = case(isnotempty(tostring(SourceIP)), tostring(SourceIP), isnotempty(tostring(SourceHostName)), tostring(SourceHostName), isnotempty(tostring(DeviceAddress)), tostring(DeviceAddress), isnotempty(tostring(Computer)), tostring(Computer), \"Unknown\")\n| extend SafeLabel = iff(strlen(Safe) > 38, strcat(substring(Safe, 0, 38), \"...\"), Safe)\n| extend AccountSafeFullName = strcat(SharedAccount, \" | \", Safe)\n| extend AccountSafeLabel = strcat(iff(strlen(SharedAccount) > 30, strcat(substring(SharedAccount, 0, 30), \"...\"), SharedAccount), \" | \", iff(strlen(Safe) > 25, strcat(substring(Safe, 0, 25), \"...\"), Safe));\nCyberArkPasswordRetrievals\n| where EventType == \"Human / Nominal User\"\n| where \"__none__\" in~ ({ExcludedSharedAccounts}) or SharedAccount !in~ ({ExcludedSharedAccounts})\n| where isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\")\n| summarize Retrievals=count() by SharedAccountCategory\n| order by Retrievals desc",
+              "size": 0,
+              "title": "Show Password events by shared account category",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart"
+            },
+            "customWidth": "50",
+            "name": "shared-category-chart",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkPasswordRetrievals = CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"295\"\n| extend ActorUser = tostring(SourceUserName)\n| extend EventType = case(\n    ActorUser contains \"PasswordManager\" or ActorUser contains \"NotificationEngine\" or ActorUser contains \"PSM\" or ActorUser contains \"PVWA\" or ActorUser contains \"AIM\" or ActorUser contains \"Provider\" or ActorUser contains \"AppProvider\" or ActorUser contains \"CyberarkAccountsIntegration\", \"CyberArk Component\",\n    ActorUser startswith \"Prov_\", \"Application / Provider\",\n    isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n    \"Human / Nominal User\")\n| extend SharedAccount = tostring(DestinationUserName)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend AccountName = tostring(SourceUserName)\n| extend SharedAccountLower = tolower(SharedAccount)\n| extend SafeLower = tolower(Safe)\n| extend SharedAccountCategory = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Utenza automation / sistema\",\n    SafeLower contains \"ut-general\", \"Utenza tecnica\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Utenza privilegiata / Shared PIM\",\n    \"Unknown / Not mapped\")\n| extend SharedAccountCategoryReason = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Known automation/system account\",\n    SafeLower contains \"ut-general\", \"Safe / Platform UT-General\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Default privileged/shared PIM account\",\n    \"Missing or unmapped shared account\")\n| extend ClientSource = case(isnotempty(tostring(SourceIP)), tostring(SourceIP), isnotempty(tostring(SourceHostName)), tostring(SourceHostName), isnotempty(tostring(DeviceAddress)), tostring(DeviceAddress), isnotempty(tostring(Computer)), tostring(Computer), \"Unknown\")\n| extend SafeLabel = iff(strlen(Safe) > 38, strcat(substring(Safe, 0, 38), \"...\"), Safe)\n| extend AccountSafeFullName = strcat(SharedAccount, \" | \", Safe)\n| extend AccountSafeLabel = strcat(iff(strlen(SharedAccount) > 30, strcat(substring(SharedAccount, 0, 30), \"...\"), SharedAccount), \" | \", iff(strlen(Safe) > 25, strcat(substring(Safe, 0, 25), \"...\"), Safe));\nCyberArkPasswordRetrievals\n| where EventType == \"Human / Nominal User\"\n| where \"__none__\" in~ ({ExcludedSharedAccounts}) or SharedAccount !in~ ({ExcludedSharedAccounts})\n| where isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\")\n| summarize Retrievals=count() by bin(TimeGenerated, 1d), SharedAccountCategory\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "Show Password trend by shared account category",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart"
+            },
+            "customWidth": "50",
+            "name": "shared-category-trend",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkPasswordRetrievals = CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"295\"\n| extend ActorUser = tostring(SourceUserName)\n| extend EventType = case(\n    ActorUser contains \"PasswordManager\" or ActorUser contains \"NotificationEngine\" or ActorUser contains \"PSM\" or ActorUser contains \"PVWA\" or ActorUser contains \"AIM\" or ActorUser contains \"Provider\" or ActorUser contains \"AppProvider\" or ActorUser contains \"CyberarkAccountsIntegration\", \"CyberArk Component\",\n    ActorUser startswith \"Prov_\", \"Application / Provider\",\n    isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n    \"Human / Nominal User\")\n| extend SharedAccount = tostring(DestinationUserName)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend AccountName = tostring(SourceUserName)\n| extend SharedAccountLower = tolower(SharedAccount)\n| extend SafeLower = tolower(Safe)\n| extend SharedAccountCategory = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Utenza automation / sistema\",\n    SafeLower contains \"ut-general\", \"Utenza tecnica\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Utenza privilegiata / Shared PIM\",\n    \"Unknown / Not mapped\")\n| extend SharedAccountCategoryReason = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Known automation/system account\",\n    SafeLower contains \"ut-general\", \"Safe / Platform UT-General\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Default privileged/shared PIM account\",\n    \"Missing or unmapped shared account\")\n| extend ClientSource = case(isnotempty(tostring(SourceIP)), tostring(SourceIP), isnotempty(tostring(SourceHostName)), tostring(SourceHostName), isnotempty(tostring(DeviceAddress)), tostring(DeviceAddress), isnotempty(tostring(Computer)), tostring(Computer), \"Unknown\")\n| extend SafeLabel = iff(strlen(Safe) > 38, strcat(substring(Safe, 0, 38), \"...\"), Safe)\n| extend AccountSafeFullName = strcat(SharedAccount, \" | \", Safe)\n| extend AccountSafeLabel = strcat(iff(strlen(SharedAccount) > 30, strcat(substring(SharedAccount, 0, 30), \"...\"), SharedAccount), \" | \", iff(strlen(Safe) > 25, strcat(substring(Safe, 0, 25), \"...\"), Safe));\nCyberArkPasswordRetrievals\n| where EventType == \"Human / Nominal User\"\n| where \"__none__\" in~ ({ExcludedSharedAccounts}) or SharedAccount !in~ ({ExcludedSharedAccounts})\n| summarize Retrievals=count() by ActorUser\n| top 10 by Retrievals desc",
+              "size": 0,
+              "title": "Top nominal users retrieving passwords",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart"
+            },
+            "customWidth": "50",
+            "name": "top-users",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkPasswordRetrievals = CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"295\"\n| extend ActorUser = tostring(SourceUserName)\n| extend EventType = case(\n    ActorUser contains \"PasswordManager\" or ActorUser contains \"NotificationEngine\" or ActorUser contains \"PSM\" or ActorUser contains \"PVWA\" or ActorUser contains \"AIM\" or ActorUser contains \"Provider\" or ActorUser contains \"AppProvider\" or ActorUser contains \"CyberarkAccountsIntegration\", \"CyberArk Component\",\n    ActorUser startswith \"Prov_\", \"Application / Provider\",\n    isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n    \"Human / Nominal User\")\n| extend SharedAccount = tostring(DestinationUserName)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend AccountName = tostring(SourceUserName)\n| extend SharedAccountLower = tolower(SharedAccount)\n| extend SafeLower = tolower(Safe)\n| extend SharedAccountCategory = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Utenza automation / sistema\",\n    SafeLower contains \"ut-general\", \"Utenza tecnica\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Utenza privilegiata / Shared PIM\",\n    \"Unknown / Not mapped\")\n| extend SharedAccountCategoryReason = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Known automation/system account\",\n    SafeLower contains \"ut-general\", \"Safe / Platform UT-General\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Default privileged/shared PIM account\",\n    \"Missing or unmapped shared account\")\n| extend ClientSource = case(isnotempty(tostring(SourceIP)), tostring(SourceIP), isnotempty(tostring(SourceHostName)), tostring(SourceHostName), isnotempty(tostring(DeviceAddress)), tostring(DeviceAddress), isnotempty(tostring(Computer)), tostring(Computer), \"Unknown\")\n| extend SafeLabel = iff(strlen(Safe) > 38, strcat(substring(Safe, 0, 38), \"...\"), Safe)\n| extend AccountSafeFullName = strcat(SharedAccount, \" | \", Safe)\n| extend AccountSafeLabel = strcat(iff(strlen(SharedAccount) > 30, strcat(substring(SharedAccount, 0, 30), \"...\"), SharedAccount), \" | \", iff(strlen(Safe) > 25, strcat(substring(Safe, 0, 25), \"...\"), Safe));\nCyberArkPasswordRetrievals\n| where EventType == \"Human / Nominal User\"\n| where \"__none__\" in~ ({ExcludedSharedAccounts}) or SharedAccount !in~ ({ExcludedSharedAccounts})\n| where isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\")\n| summarize Retrievals=count(), DistinctHumanUsers=dcount(ActorUser), DistinctClientSources=dcount(ClientSource), FirstSeen=min(TimeGenerated), LastSeen=max(TimeGenerated) by Safe, SharedAccount, SharedAccountCategory, SharedAccountCategoryReason\n| top 25 by Retrievals desc\n| order by Retrievals desc",
+              "size": 0,
+              "title": "Account retrieval details",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "customWidth": "50",
+            "name": "top-accounts-table",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkPasswordRetrievals = CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"295\"\n| extend ActorUser = tostring(SourceUserName)\n| extend EventType = case(\n    ActorUser contains \"PasswordManager\" or ActorUser contains \"NotificationEngine\" or ActorUser contains \"PSM\" or ActorUser contains \"PVWA\" or ActorUser contains \"AIM\" or ActorUser contains \"Provider\" or ActorUser contains \"AppProvider\" or ActorUser contains \"CyberarkAccountsIntegration\", \"CyberArk Component\",\n    ActorUser startswith \"Prov_\", \"Application / Provider\",\n    isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n    \"Human / Nominal User\")\n| extend SharedAccount = tostring(DestinationUserName)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend AccountName = tostring(SourceUserName)\n| extend SharedAccountLower = tolower(SharedAccount)\n| extend SafeLower = tolower(Safe)\n| extend SharedAccountCategory = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Utenza automation / sistema\",\n    SafeLower contains \"ut-general\", \"Utenza tecnica\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Utenza privilegiata / Shared PIM\",\n    \"Unknown / Not mapped\")\n| extend SharedAccountCategoryReason = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Known automation/system account\",\n    SafeLower contains \"ut-general\", \"Safe / Platform UT-General\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Default privileged/shared PIM account\",\n    \"Missing or unmapped shared account\")\n| extend ClientSource = case(isnotempty(tostring(SourceIP)), tostring(SourceIP), isnotempty(tostring(SourceHostName)), tostring(SourceHostName), isnotempty(tostring(DeviceAddress)), tostring(DeviceAddress), isnotempty(tostring(Computer)), tostring(Computer), \"Unknown\")\n| extend SafeLabel = iff(strlen(Safe) > 38, strcat(substring(Safe, 0, 38), \"...\"), Safe)\n| extend AccountSafeFullName = strcat(SharedAccount, \" | \", Safe)\n| extend AccountSafeLabel = strcat(iff(strlen(SharedAccount) > 30, strcat(substring(SharedAccount, 0, 30), \"...\"), SharedAccount), \" | \", iff(strlen(Safe) > 25, strcat(substring(Safe, 0, 25), \"...\"), Safe));\nCyberArkPasswordRetrievals\n| where EventType == \"Human / Nominal User\"\n| where \"__none__\" in~ ({ExcludedSharedAccounts}) or SharedAccount !in~ ({ExcludedSharedAccounts})\n| where SharedAccountCategory == \"Utenza automation / sistema\"\n| summarize Retrievals=count(), DistinctHumanUsers=dcount(ActorUser), DistinctClientSources=dcount(ClientSource), FirstSeen=min(TimeGenerated), LastSeen=max(TimeGenerated) by Safe, SharedAccount, SharedAccountCategoryReason\n| order by Retrievals desc",
+              "size": 0,
+              "title": "Automation/system accounts retrieved via Show Password",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "customWidth": "50",
+            "name": "automation-system-accounts",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkPasswordRetrievals = CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"295\"\n| extend ActorUser = tostring(SourceUserName)\n| extend EventType = case(\n    ActorUser contains \"PasswordManager\" or ActorUser contains \"NotificationEngine\" or ActorUser contains \"PSM\" or ActorUser contains \"PVWA\" or ActorUser contains \"AIM\" or ActorUser contains \"Provider\" or ActorUser contains \"AppProvider\" or ActorUser contains \"CyberarkAccountsIntegration\", \"CyberArk Component\",\n    ActorUser startswith \"Prov_\", \"Application / Provider\",\n    isempty(ActorUser) or ActorUser == \"-\", \"Unknown/System\",\n    \"Human / Nominal User\")\n| extend SharedAccount = tostring(DestinationUserName)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend AccountName = tostring(SourceUserName)\n| extend SharedAccountLower = tolower(SharedAccount)\n| extend SafeLower = tolower(Safe)\n| extend SharedAccountCategory = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Utenza automation / sistema\",\n    SafeLower contains \"ut-general\", \"Utenza tecnica\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Utenza privilegiata / Shared PIM\",\n    \"Unknown / Not mapped\")\n| extend SharedAccountCategoryReason = case(\n    SharedAccountLower contains \"recon\" or SharedAccountLower contains \"pimgate\" or SharedAccountLower contains \"cyberarklogon\", \"Known automation/system account\",\n    SafeLower contains \"ut-general\", \"Safe / Platform UT-General\",\n    isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\"), \"Default privileged/shared PIM account\",\n    \"Missing or unmapped shared account\")\n| extend ClientSource = case(isnotempty(tostring(SourceIP)), tostring(SourceIP), isnotempty(tostring(SourceHostName)), tostring(SourceHostName), isnotempty(tostring(DeviceAddress)), tostring(DeviceAddress), isnotempty(tostring(Computer)), tostring(Computer), \"Unknown\")\n| extend SafeLabel = iff(strlen(Safe) > 38, strcat(substring(Safe, 0, 38), \"...\"), Safe)\n| extend AccountSafeFullName = strcat(SharedAccount, \" | \", Safe)\n| extend AccountSafeLabel = strcat(iff(strlen(SharedAccount) > 30, strcat(substring(SharedAccount, 0, 30), \"...\"), SharedAccount), \" | \", iff(strlen(Safe) > 25, strcat(substring(Safe, 0, 25), \"...\"), Safe));\nCyberArkPasswordRetrievals\n| where EventType == \"Human / Nominal User\"\n| where \"__none__\" in~ ({ExcludedSharedAccounts}) or SharedAccount !in~ ({ExcludedSharedAccounts})\n| where SharedAccountCategory == \"Utenza tecnica\"\n| summarize Retrievals=count(), DistinctHumanUsers=dcount(ActorUser), DistinctClientSources=dcount(ClientSource), FirstSeen=min(TimeGenerated), LastSeen=max(TimeGenerated) by Safe, SharedAccount, SharedAccountCategoryReason\n| order by Retrievals desc",
+              "size": 0,
+              "title": "Technical accounts retrieved via Show Password",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "customWidth": "50",
+            "name": "technical-accounts",
+            "styleSettings": {
+              "showBorder": true
+            }
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "MainTab",
+        "comparison": "isEqualTo",
+        "value": "CyberArkMonitoring"
+      },
+      "name": "group-cyberark-monitoring"
+    },
+    {
+      "type": 12,
+      "content": {
+        "version": "NotebookGroup/1.0",
+        "groupType": "editable",
+        "items": [
+          {
+            "type": 1,
+            "content": {
+              "json": "## 🔁 Password Change / Reset Monitoring\nBackslash-safe version: Windows accounts are shown as `DOMAIN/User`."
+            },
+            "name": "pw-title"
+          },
+          {
+            "type": 9,
+            "content": {
+              "version": "KqlParameterItem/1.0",
+              "parameters": [
+                {
+                  "id": "b5da4f98-90dc-42b9-8147-0c0113ceb721",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "TargetAccountSearch",
+                  "label": "🔎 Target account contains",
+                  "type": 1,
+                  "value": "pim",
+                  "timeContext": {
+                    "durationMs": 86400000
+                  },
+                  "timeContextFromParameter": "TimeRange"
+                },
+                {
+                  "id": "597e2a13-9712-4118-8ca1-f03844eeb86c",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "PasswordClassificationCsv",
+                  "label": "🏷️ Classification CSV",
+                  "type": 1,
+                  "isRequired": true,
+                  "value": "Admin reset",
+                  "timeContext": {
+                    "durationMs": 86400000
+                  },
+                  "timeContextFromParameter": "TimeRange"
+                },
+                {
+                  "id": "7013c8b8-442a-4e1e-ad93-d468c309f030",
+                  "version": "KqlParameterItem/1.0",
+                  "name": "PasswordPlatformCsv",
+                  "label": "🧭 Platform CSV",
+                  "type": 1,
+                  "isRequired": true,
+                  "value": "Cloud,Windows",
+                  "timeContext": {
+                    "durationMs": 86400000
+                  },
+                  "timeContextFromParameter": "TimeRange"
+                }
+              ],
+              "style": "pills",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "name": "pw-params"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let _TargetAccountSearch = \"{TargetAccountSearch}\";\nlet _ClassificationFilter = split(\"{PasswordClassificationCsv}\", \",\");\nlet _PlatformFilter = split(\"{PasswordPlatformCsv}\", \",\");\nlet EntraPasswordEvents =\nAuditLogs\n| where TimeGenerated >= {TimeRange:start}\n| where Category == \"UserManagement\"\n| where OperationName in (\"Change user password\", \"Reset user password\", \"Reset password (self-service)\", \"AdminResetPassword\", \"UserPasswordReset\", \"Update user password\")\n| where Result =~ \"success\"\n| extend InitiatedByUser=tostring(InitiatedBy.user.userPrincipalName)\n| extend InitiatedByApp=tostring(InitiatedBy.app.displayName)\n| extend Initiator=coalesce(InitiatedByUser, InitiatedByApp, Identity)\n| mv-expand TargetResource=TargetResources\n| where tostring(TargetResource.type)==\"User\"\n| extend TargetUser=tostring(TargetResource.userPrincipalName)\n| extend TargetType=case(TargetUser has \"#EXT#\" or TargetUser contains \".external@\", \"Guest/External cloud account\", isnotempty(TargetUser), \"Cloud account\", \"Unknown\")\n| extend ChangedByType=case(isnotempty(InitiatedByUser), \"User\", isnotempty(InitiatedByApp) and (tolower(InitiatedByApp) has \"sync\" or tolower(InitiatedByApp) has \"provision\" or tolower(InitiatedByApp) has \"aad connect\" or tolower(InitiatedByApp) has \"service\" or tolower(InitiatedByApp) has \"daemon\" or tolower(InitiatedByApp) has \"agent\"), \"Service\", isnotempty(InitiatedByApp), \"Application\", \"Unknown\")\n| extend Classification=case(OperationName has \"self-service\", \"SSPR\", ChangedByType==\"Service\", \"Application / Service\", ChangedByType==\"Application\", \"Application\", tolower(InitiatedByUser)==tolower(TargetUser), \"Self password change\", isnotempty(InitiatedByUser) and tolower(InitiatedByUser)!=tolower(TargetUser), \"Admin reset\", \"Unknown\")\n| project When=TimeGenerated, Platform=\"Cloud\", DataSource=\"EntraID-AuditLogs\", Scope=\"Cloud\", TargetType, ChangedByType, Classification, Action=OperationName, ChangedBy=Initiator, TargetAccount=TargetUser, IPAddress=tostring(InitiatedBy.user.ipAddress), HostName=\"\", Result=\"Success\";\nlet WindowsPasswordEvents =\nSecurityEvent\n| where TimeGenerated >= {TimeRange:start}\n| where EventID in (4723,4724)\n| where isnotempty(TargetUserName)\n| where TargetUserName !endswith \"$\"\n| extend ComputerShort=toupper(tostring(split(Computer,\".\")[0]))\n| extend ChangedBy=iff(isnotempty(SubjectDomainName), strcat(SubjectDomainName,\"/\",SubjectUserName), SubjectUserName)\n| extend TargetAccount=iff(isnotempty(TargetDomainName), strcat(TargetDomainName,\"/\",TargetUserName), TargetUserName)\n| extend Scope=case(isempty(TargetDomainName), \"Unknown\", toupper(TargetDomainName)==ComputerShort, \"Local\", TargetDomainName in~ (\"BUILTIN\",\"NT AUTHORITY\"), \"Local/Built-in\", \"Domain\")\n| extend TargetType=case(Scope==\"Local\", \"Local account\", Scope==\"Local/Built-in\", \"Built-in / Local service account\", Scope==\"Domain\", \"Domain account\", \"Unknown\")\n| extend ChangedByType=case(toupper(SubjectUserName) in (\"SYSTEM\",\"LOCAL SERVICE\",\"NETWORK SERVICE\"), \"Service\", toupper(SubjectDomainName)==\"NT AUTHORITY\", \"Service\", isnotempty(SubjectUserName), \"User\", \"Unknown\")\n| extend Classification=case(EventID==4723 and tolower(SubjectUserName)==tolower(TargetUserName), \"Self password change\", EventID==4724 and ChangedByType==\"Service\", \"Service reset\", EventID==4724, \"Admin reset\", EventID==4723, \"Password change - review\", \"Unknown\")\n| extend Action=case(EventID==4723,\"Change password\",EventID==4724,\"Reset password\",\"Other\")\n| project When=TimeGenerated, Platform=\"Windows\", DataSource=\"Windows-SecurityEvent\", Scope, TargetType, ChangedByType, Classification, Action, ChangedBy, TargetAccount, IPAddress=\"\", HostName=Computer, Result=\"Success\";\nlet PasswordEventsRaw = EntraPasswordEvents\n| union isfuzzy=true WindowsPasswordEvents;\nlet PasswordEvents = PasswordEventsRaw\n| where isempty(_TargetAccountSearch) or TargetAccount contains _TargetAccountSearch\n| where set_has_element(_ClassificationFilter, Classification)\n| where set_has_element(_PlatformFilter, Platform)\n| where ChangedBy !contains \"recon\" and ChangedBy !contains \"pimgate\" and ChangedBy !contains \"cyberarklogon\";\nunion\n(PasswordEvents | summarize Value=count() | extend Metric=\"🔁 Password events\", SortOrder=1),\n(PasswordEvents | summarize Value=dcount(TargetAccount) | extend Metric=\"🎯 Distinct target accounts\", SortOrder=2),\n(PasswordEvents | summarize Value=dcount(ChangedBy) | extend Metric=\"👤 Distinct changers\", SortOrder=3)\n| order by SortOrder asc\n| project Metric, Value",
+              "size": 1,
+              "title": "Password event KPI summary",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "tiles",
+              "tileSettings": {
+                "showBorder": false,
+                "titleContent": {
+                  "columnMatch": "Metric",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "auto"
+                  },
+                  "numberFormat": {
+                    "unit": 17,
+                    "options": {
+                      "maximumSignificantDigits": 3,
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                }
+              }
+            },
+            "name": "pw-kpi",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let _TargetAccountSearch = \"{TargetAccountSearch}\";\nlet _ClassificationFilter = split(\"{PasswordClassificationCsv}\", \",\");\nlet _PlatformFilter = split(\"{PasswordPlatformCsv}\", \",\");\nlet EntraPasswordEvents =\nAuditLogs\n| where TimeGenerated >= {TimeRange:start}\n| where Category == \"UserManagement\"\n| where OperationName in (\"Change user password\", \"Reset user password\", \"Reset password (self-service)\", \"AdminResetPassword\", \"UserPasswordReset\", \"Update user password\")\n| where Result =~ \"success\"\n| extend InitiatedByUser=tostring(InitiatedBy.user.userPrincipalName)\n| extend InitiatedByApp=tostring(InitiatedBy.app.displayName)\n| extend Initiator=coalesce(InitiatedByUser, InitiatedByApp, Identity)\n| mv-expand TargetResource=TargetResources\n| where tostring(TargetResource.type)==\"User\"\n| extend TargetUser=tostring(TargetResource.userPrincipalName)\n| extend TargetType=case(TargetUser has \"#EXT#\" or TargetUser contains \".external@\", \"Guest/External cloud account\", isnotempty(TargetUser), \"Cloud account\", \"Unknown\")\n| extend ChangedByType=case(isnotempty(InitiatedByUser), \"User\", isnotempty(InitiatedByApp) and (tolower(InitiatedByApp) has \"sync\" or tolower(InitiatedByApp) has \"provision\" or tolower(InitiatedByApp) has \"aad connect\" or tolower(InitiatedByApp) has \"service\" or tolower(InitiatedByApp) has \"daemon\" or tolower(InitiatedByApp) has \"agent\"), \"Service\", isnotempty(InitiatedByApp), \"Application\", \"Unknown\")\n| extend Classification=case(OperationName has \"self-service\", \"SSPR\", ChangedByType==\"Service\", \"Application / Service\", ChangedByType==\"Application\", \"Application\", tolower(InitiatedByUser)==tolower(TargetUser), \"Self password change\", isnotempty(InitiatedByUser) and tolower(InitiatedByUser)!=tolower(TargetUser), \"Admin reset\", \"Unknown\")\n| project When=TimeGenerated, Platform=\"Cloud\", DataSource=\"EntraID-AuditLogs\", Scope=\"Cloud\", TargetType, ChangedByType, Classification, Action=OperationName, ChangedBy=Initiator, TargetAccount=TargetUser, IPAddress=tostring(InitiatedBy.user.ipAddress), HostName=\"\", Result=\"Success\";\nlet WindowsPasswordEvents =\nSecurityEvent\n| where TimeGenerated >= {TimeRange:start}\n| where EventID in (4723,4724)\n| where isnotempty(TargetUserName)\n| where TargetUserName !endswith \"$\"\n| extend ComputerShort=toupper(tostring(split(Computer,\".\")[0]))\n| extend ChangedBy=iff(isnotempty(SubjectDomainName), strcat(SubjectDomainName,\"/\",SubjectUserName), SubjectUserName)\n| extend TargetAccount=iff(isnotempty(TargetDomainName), strcat(TargetDomainName,\"/\",TargetUserName), TargetUserName)\n| extend Scope=case(isempty(TargetDomainName), \"Unknown\", toupper(TargetDomainName)==ComputerShort, \"Local\", TargetDomainName in~ (\"BUILTIN\",\"NT AUTHORITY\"), \"Local/Built-in\", \"Domain\")\n| extend TargetType=case(Scope==\"Local\", \"Local account\", Scope==\"Local/Built-in\", \"Built-in / Local service account\", Scope==\"Domain\", \"Domain account\", \"Unknown\")\n| extend ChangedByType=case(toupper(SubjectUserName) in (\"SYSTEM\",\"LOCAL SERVICE\",\"NETWORK SERVICE\"), \"Service\", toupper(SubjectDomainName)==\"NT AUTHORITY\", \"Service\", isnotempty(SubjectUserName), \"User\", \"Unknown\")\n| extend Classification=case(EventID==4723 and tolower(SubjectUserName)==tolower(TargetUserName), \"Self password change\", EventID==4724 and ChangedByType==\"Service\", \"Service reset\", EventID==4724, \"Admin reset\", EventID==4723, \"Password change - review\", \"Unknown\")\n| extend Action=case(EventID==4723,\"Change password\",EventID==4724,\"Reset password\",\"Other\")\n| project When=TimeGenerated, Platform=\"Windows\", DataSource=\"Windows-SecurityEvent\", Scope, TargetType, ChangedByType, Classification, Action, ChangedBy, TargetAccount, IPAddress=\"\", HostName=Computer, Result=\"Success\";\nlet PasswordEventsRaw = EntraPasswordEvents\n| union isfuzzy=true WindowsPasswordEvents;\nlet PasswordEvents = PasswordEventsRaw\n| where isempty(_TargetAccountSearch) or TargetAccount contains _TargetAccountSearch\n| where set_has_element(_ClassificationFilter, Classification)\n| where set_has_element(_PlatformFilter, Platform)\n| where ChangedBy !contains \"recon\" and ChangedBy !contains \"pimgate\" and ChangedBy !contains \"cyberarklogon\";\nPasswordEvents\n| summarize Events=count() by bin(When,1d), Platform\n| order by When asc",
+              "size": 0,
+              "title": "Password events over time by platform",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart"
+            },
+            "customWidth": "50",
+            "name": "pw-trend",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let _TargetAccountSearch = \"{TargetAccountSearch}\";\nlet _ClassificationFilter = split(\"{PasswordClassificationCsv}\", \",\");\nlet _PlatformFilter = split(\"{PasswordPlatformCsv}\", \",\");\nlet EntraPasswordEvents =\nAuditLogs\n| where TimeGenerated >= {TimeRange:start}\n| where Category == \"UserManagement\"\n| where OperationName in (\"Change user password\", \"Reset user password\", \"Reset password (self-service)\", \"AdminResetPassword\", \"UserPasswordReset\", \"Update user password\")\n| where Result =~ \"success\"\n| extend InitiatedByUser=tostring(InitiatedBy.user.userPrincipalName)\n| extend InitiatedByApp=tostring(InitiatedBy.app.displayName)\n| extend Initiator=coalesce(InitiatedByUser, InitiatedByApp, Identity)\n| mv-expand TargetResource=TargetResources\n| where tostring(TargetResource.type)==\"User\"\n| extend TargetUser=tostring(TargetResource.userPrincipalName)\n| extend TargetType=case(TargetUser has \"#EXT#\" or TargetUser contains \".external@\", \"Guest/External cloud account\", isnotempty(TargetUser), \"Cloud account\", \"Unknown\")\n| extend ChangedByType=case(isnotempty(InitiatedByUser), \"User\", isnotempty(InitiatedByApp) and (tolower(InitiatedByApp) has \"sync\" or tolower(InitiatedByApp) has \"provision\" or tolower(InitiatedByApp) has \"aad connect\" or tolower(InitiatedByApp) has \"service\" or tolower(InitiatedByApp) has \"daemon\" or tolower(InitiatedByApp) has \"agent\"), \"Service\", isnotempty(InitiatedByApp), \"Application\", \"Unknown\")\n| extend Classification=case(OperationName has \"self-service\", \"SSPR\", ChangedByType==\"Service\", \"Application / Service\", ChangedByType==\"Application\", \"Application\", tolower(InitiatedByUser)==tolower(TargetUser), \"Self password change\", isnotempty(InitiatedByUser) and tolower(InitiatedByUser)!=tolower(TargetUser), \"Admin reset\", \"Unknown\")\n| project When=TimeGenerated, Platform=\"Cloud\", DataSource=\"EntraID-AuditLogs\", Scope=\"Cloud\", TargetType, ChangedByType, Classification, Action=OperationName, ChangedBy=Initiator, TargetAccount=TargetUser, IPAddress=tostring(InitiatedBy.user.ipAddress), HostName=\"\", Result=\"Success\";\nlet WindowsPasswordEvents =\nSecurityEvent\n| where TimeGenerated >= {TimeRange:start}\n| where EventID in (4723,4724)\n| where isnotempty(TargetUserName)\n| where TargetUserName !endswith \"$\"\n| extend ComputerShort=toupper(tostring(split(Computer,\".\")[0]))\n| extend ChangedBy=iff(isnotempty(SubjectDomainName), strcat(SubjectDomainName,\"/\",SubjectUserName), SubjectUserName)\n| extend TargetAccount=iff(isnotempty(TargetDomainName), strcat(TargetDomainName,\"/\",TargetUserName), TargetUserName)\n| extend Scope=case(isempty(TargetDomainName), \"Unknown\", toupper(TargetDomainName)==ComputerShort, \"Local\", TargetDomainName in~ (\"BUILTIN\",\"NT AUTHORITY\"), \"Local/Built-in\", \"Domain\")\n| extend TargetType=case(Scope==\"Local\", \"Local account\", Scope==\"Local/Built-in\", \"Built-in / Local service account\", Scope==\"Domain\", \"Domain account\", \"Unknown\")\n| extend ChangedByType=case(toupper(SubjectUserName) in (\"SYSTEM\",\"LOCAL SERVICE\",\"NETWORK SERVICE\"), \"Service\", toupper(SubjectDomainName)==\"NT AUTHORITY\", \"Service\", isnotempty(SubjectUserName), \"User\", \"Unknown\")\n| extend Classification=case(EventID==4723 and tolower(SubjectUserName)==tolower(TargetUserName), \"Self password change\", EventID==4724 and ChangedByType==\"Service\", \"Service reset\", EventID==4724, \"Admin reset\", EventID==4723, \"Password change - review\", \"Unknown\")\n| extend Action=case(EventID==4723,\"Change password\",EventID==4724,\"Reset password\",\"Other\")\n| project When=TimeGenerated, Platform=\"Windows\", DataSource=\"Windows-SecurityEvent\", Scope, TargetType, ChangedByType, Classification, Action, ChangedBy, TargetAccount, IPAddress=\"\", HostName=Computer, Result=\"Success\";\nlet PasswordEventsRaw = EntraPasswordEvents\n| union isfuzzy=true WindowsPasswordEvents;\nlet PasswordEvents = PasswordEventsRaw\n| where isempty(_TargetAccountSearch) or TargetAccount contains _TargetAccountSearch\n| where set_has_element(_ClassificationFilter, Classification)\n| where set_has_element(_PlatformFilter, Platform)\n| where ChangedBy !contains \"recon\" and ChangedBy !contains \"pimgate\" and ChangedBy !contains \"cyberarklogon\";\nPasswordEvents\n| summarize Events=count() by Classification\n| order by Events desc",
+              "size": 0,
+              "title": "Password events by classification",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart"
+            },
+            "customWidth": "50",
+            "name": "pw-class",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let _TargetAccountSearch = \"{TargetAccountSearch}\";\nlet _ClassificationFilter = split(\"{PasswordClassificationCsv}\", \",\");\nlet _PlatformFilter = split(\"{PasswordPlatformCsv}\", \",\");\nlet EntraPasswordEvents =\nAuditLogs\n| where TimeGenerated >= {TimeRange:start}\n| where Category == \"UserManagement\"\n| where OperationName in (\"Change user password\", \"Reset user password\", \"Reset password (self-service)\", \"AdminResetPassword\", \"UserPasswordReset\", \"Update user password\")\n| where Result =~ \"success\"\n| extend InitiatedByUser=tostring(InitiatedBy.user.userPrincipalName)\n| extend InitiatedByApp=tostring(InitiatedBy.app.displayName)\n| extend Initiator=coalesce(InitiatedByUser, InitiatedByApp, Identity)\n| mv-expand TargetResource=TargetResources\n| where tostring(TargetResource.type)==\"User\"\n| extend TargetUser=tostring(TargetResource.userPrincipalName)\n| extend TargetType=case(TargetUser has \"#EXT#\" or TargetUser contains \".external@\", \"Guest/External cloud account\", isnotempty(TargetUser), \"Cloud account\", \"Unknown\")\n| extend ChangedByType=case(isnotempty(InitiatedByUser), \"User\", isnotempty(InitiatedByApp) and (tolower(InitiatedByApp) has \"sync\" or tolower(InitiatedByApp) has \"provision\" or tolower(InitiatedByApp) has \"aad connect\" or tolower(InitiatedByApp) has \"service\" or tolower(InitiatedByApp) has \"daemon\" or tolower(InitiatedByApp) has \"agent\"), \"Service\", isnotempty(InitiatedByApp), \"Application\", \"Unknown\")\n| extend Classification=case(OperationName has \"self-service\", \"SSPR\", ChangedByType==\"Service\", \"Application / Service\", ChangedByType==\"Application\", \"Application\", tolower(InitiatedByUser)==tolower(TargetUser), \"Self password change\", isnotempty(InitiatedByUser) and tolower(InitiatedByUser)!=tolower(TargetUser), \"Admin reset\", \"Unknown\")\n| project When=TimeGenerated, Platform=\"Cloud\", DataSource=\"EntraID-AuditLogs\", Scope=\"Cloud\", TargetType, ChangedByType, Classification, Action=OperationName, ChangedBy=Initiator, TargetAccount=TargetUser, IPAddress=tostring(InitiatedBy.user.ipAddress), HostName=\"\", Result=\"Success\";\nlet WindowsPasswordEvents =\nSecurityEvent\n| where TimeGenerated >= {TimeRange:start}\n| where EventID in (4723,4724)\n| where isnotempty(TargetUserName)\n| where TargetUserName !endswith \"$\"\n| extend ComputerShort=toupper(tostring(split(Computer,\".\")[0]))\n| extend ChangedBy=iff(isnotempty(SubjectDomainName), strcat(SubjectDomainName,\"/\",SubjectUserName), SubjectUserName)\n| extend TargetAccount=iff(isnotempty(TargetDomainName), strcat(TargetDomainName,\"/\",TargetUserName), TargetUserName)\n| extend Scope=case(isempty(TargetDomainName), \"Unknown\", toupper(TargetDomainName)==ComputerShort, \"Local\", TargetDomainName in~ (\"BUILTIN\",\"NT AUTHORITY\"), \"Local/Built-in\", \"Domain\")\n| extend TargetType=case(Scope==\"Local\", \"Local account\", Scope==\"Local/Built-in\", \"Built-in / Local service account\", Scope==\"Domain\", \"Domain account\", \"Unknown\")\n| extend ChangedByType=case(toupper(SubjectUserName) in (\"SYSTEM\",\"LOCAL SERVICE\",\"NETWORK SERVICE\"), \"Service\", toupper(SubjectDomainName)==\"NT AUTHORITY\", \"Service\", isnotempty(SubjectUserName), \"User\", \"Unknown\")\n| extend Classification=case(EventID==4723 and tolower(SubjectUserName)==tolower(TargetUserName), \"Self password change\", EventID==4724 and ChangedByType==\"Service\", \"Service reset\", EventID==4724, \"Admin reset\", EventID==4723, \"Password change - review\", \"Unknown\")\n| extend Action=case(EventID==4723,\"Change password\",EventID==4724,\"Reset password\",\"Other\")\n| project When=TimeGenerated, Platform=\"Windows\", DataSource=\"Windows-SecurityEvent\", Scope, TargetType, ChangedByType, Classification, Action, ChangedBy, TargetAccount, IPAddress=\"\", HostName=Computer, Result=\"Success\";\nlet PasswordEventsRaw = EntraPasswordEvents\n| union isfuzzy=true WindowsPasswordEvents;\nlet PasswordEvents = PasswordEventsRaw\n| where isempty(_TargetAccountSearch) or TargetAccount contains _TargetAccountSearch\n| where set_has_element(_ClassificationFilter, Classification)\n| where set_has_element(_PlatformFilter, Platform)\n| where ChangedBy !contains \"recon\" and ChangedBy !contains \"pimgate\" and ChangedBy !contains \"cyberarklogon\";\nPasswordEvents\n| summarize Events=count(), DistinctChangers=dcount(ChangedBy), FirstSeen=min(When), LastSeen=max(When) by TargetAccount\n| top 15 by Events desc",
+              "size": 0,
+              "title": "Top target accounts",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "customWidth": "50",
+            "name": "pw-targets",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let _TargetAccountSearch = \"{TargetAccountSearch}\";\nlet _ClassificationFilter = split(\"{PasswordClassificationCsv}\", \",\");\nlet _PlatformFilter = split(\"{PasswordPlatformCsv}\", \",\");\nlet EntraPasswordEvents =\nAuditLogs\n| where TimeGenerated >= {TimeRange:start}\n| where Category == \"UserManagement\"\n| where OperationName in (\"Change user password\", \"Reset user password\", \"Reset password (self-service)\", \"AdminResetPassword\", \"UserPasswordReset\", \"Update user password\")\n| where Result =~ \"success\"\n| extend InitiatedByUser=tostring(InitiatedBy.user.userPrincipalName)\n| extend InitiatedByApp=tostring(InitiatedBy.app.displayName)\n| extend Initiator=coalesce(InitiatedByUser, InitiatedByApp, Identity)\n| mv-expand TargetResource=TargetResources\n| where tostring(TargetResource.type)==\"User\"\n| extend TargetUser=tostring(TargetResource.userPrincipalName)\n| extend TargetType=case(TargetUser has \"#EXT#\" or TargetUser contains \".external@\", \"Guest/External cloud account\", isnotempty(TargetUser), \"Cloud account\", \"Unknown\")\n| extend ChangedByType=case(isnotempty(InitiatedByUser), \"User\", isnotempty(InitiatedByApp) and (tolower(InitiatedByApp) has \"sync\" or tolower(InitiatedByApp) has \"provision\" or tolower(InitiatedByApp) has \"aad connect\" or tolower(InitiatedByApp) has \"service\" or tolower(InitiatedByApp) has \"daemon\" or tolower(InitiatedByApp) has \"agent\"), \"Service\", isnotempty(InitiatedByApp), \"Application\", \"Unknown\")\n| extend Classification=case(OperationName has \"self-service\", \"SSPR\", ChangedByType==\"Service\", \"Application / Service\", ChangedByType==\"Application\", \"Application\", tolower(InitiatedByUser)==tolower(TargetUser), \"Self password change\", isnotempty(InitiatedByUser) and tolower(InitiatedByUser)!=tolower(TargetUser), \"Admin reset\", \"Unknown\")\n| project When=TimeGenerated, Platform=\"Cloud\", DataSource=\"EntraID-AuditLogs\", Scope=\"Cloud\", TargetType, ChangedByType, Classification, Action=OperationName, ChangedBy=Initiator, TargetAccount=TargetUser, IPAddress=tostring(InitiatedBy.user.ipAddress), HostName=\"\", Result=\"Success\";\nlet WindowsPasswordEvents =\nSecurityEvent\n| where TimeGenerated >= {TimeRange:start}\n| where EventID in (4723,4724)\n| where isnotempty(TargetUserName)\n| where TargetUserName !endswith \"$\"\n| extend ComputerShort=toupper(tostring(split(Computer,\".\")[0]))\n| extend ChangedBy=iff(isnotempty(SubjectDomainName), strcat(SubjectDomainName,\"/\",SubjectUserName), SubjectUserName)\n| extend TargetAccount=iff(isnotempty(TargetDomainName), strcat(TargetDomainName,\"/\",TargetUserName), TargetUserName)\n| extend Scope=case(isempty(TargetDomainName), \"Unknown\", toupper(TargetDomainName)==ComputerShort, \"Local\", TargetDomainName in~ (\"BUILTIN\",\"NT AUTHORITY\"), \"Local/Built-in\", \"Domain\")\n| extend TargetType=case(Scope==\"Local\", \"Local account\", Scope==\"Local/Built-in\", \"Built-in / Local service account\", Scope==\"Domain\", \"Domain account\", \"Unknown\")\n| extend ChangedByType=case(toupper(SubjectUserName) in (\"SYSTEM\",\"LOCAL SERVICE\",\"NETWORK SERVICE\"), \"Service\", toupper(SubjectDomainName)==\"NT AUTHORITY\", \"Service\", isnotempty(SubjectUserName), \"User\", \"Unknown\")\n| extend Classification=case(EventID==4723 and tolower(SubjectUserName)==tolower(TargetUserName), \"Self password change\", EventID==4724 and ChangedByType==\"Service\", \"Service reset\", EventID==4724, \"Admin reset\", EventID==4723, \"Password change - review\", \"Unknown\")\n| extend Action=case(EventID==4723,\"Change password\",EventID==4724,\"Reset password\",\"Other\")\n| project When=TimeGenerated, Platform=\"Windows\", DataSource=\"Windows-SecurityEvent\", Scope, TargetType, ChangedByType, Classification, Action, ChangedBy, TargetAccount, IPAddress=\"\", HostName=Computer, Result=\"Success\";\nlet PasswordEventsRaw = EntraPasswordEvents\n| union isfuzzy=true WindowsPasswordEvents;\nlet PasswordEvents = PasswordEventsRaw\n| where isempty(_TargetAccountSearch) or TargetAccount contains _TargetAccountSearch\n| where set_has_element(_ClassificationFilter, Classification)\n| where set_has_element(_PlatformFilter, Platform)\n| where ChangedBy !contains \"recon\" and ChangedBy !contains \"pimgate\" and ChangedBy !contains \"cyberarklogon\";\nPasswordEvents\n| summarize Events=count(), DistinctTargets=dcount(TargetAccount), FirstSeen=min(When), LastSeen=max(When) by ChangedBy, ChangedByType\n| top 15 by Events desc",
+              "size": 0,
+              "title": "Top password changers",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "customWidth": "50",
+            "name": "pw-changers",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 1,
+            "content": {
+              "json": "## 🔐 CyberArk CPM password management errors\nThis section monitors CyberArk CPM password management failures, including `CPM Change Password Failed` on impacted shared accounts.\n\n**Verify Password Failures (Code 2114) baseline** — validated against 30 days of production data: most `VerificationPeriod`-triggered failures trace back to CyberArk's own reconciliation actors (`recon`, `pimgate`, `cyberarklogon`) or bulk password-rotation waves, not external/unauthorized changes. Only `ImmediateTask`-triggered failures (real credential usage) warrant per-case investigation — see the Priority Baseline table below."
+            },
+            "name": "cpm-section-title"
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkCPMEvents =\nCommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) in (\"22\", \"24\", \"31\", \"38\", \"57\", \"60\", \"130\")\n| extend EventId = tostring(DeviceEventClassID)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend SharedAccount = tostring(DestinationUserName)\n| extend ActorUser = tostring(SourceUserName)\n| extend CPMOperation = case(\n    EventId in (\"24\", \"57\"), \"Change Password\",\n    EventId in (\"22\", \"38\"), \"Verify Password\",\n    EventId in (\"31\", \"60\"), \"Reconcile Password\",\n    EventId == \"130\", \"Disable Password\",\n    \"Other\")\n| extend CPMResult = case(\n    EventId in (\"22\", \"24\", \"31\"), \"Success\",\n    EventId in (\"38\", \"57\", \"60\", \"130\"), \"Failure\",\n    \"Unknown\")\n| extend CPMEventDescription = case(\n    EventId == \"24\", \"CPM Change Password\",\n    EventId == \"57\", \"CPM Change Password Failed\",\n    EventId == \"22\", \"CPM Verify Password\",\n    EventId == \"38\", \"CPM Verify Password Failed\",\n    EventId == \"31\", \"CPM Reconcile Password\",\n    EventId == \"60\", \"CPM Reconcile Password Failed\",\n    EventId == \"130\", \"CPM Disable Password Failed\",\n    Activity)\n| extend ErrorText = strcat(tostring(Message), \" \", tostring(Reason), \" \", tostring(AdditionalExtensions), \" \", tostring(DeviceCustomString1), \" \", tostring(DeviceCustomString2), \" \", tostring(DeviceCustomString3), \" \", tostring(DeviceCustomString4), \" \", tostring(DeviceCustomString5), \" \", tostring(DeviceCustomString6));\nlet CyberArkCPMFailures = CyberArkCPMEvents\n| where CPMResult == \"Failure\";\nunion\n(CyberArkCPMFailures | summarize Value=count() | extend Metric=\"❌ CPM failure events\", SortOrder=1),\n(CyberArkCPMFailures | where EventId == \"57\" | summarize Value=count() | extend Metric=\"🔁 Change password failures\", SortOrder=2),\n(CyberArkCPMFailures | summarize Value=dcount(SharedAccount) | extend Metric=\"🔑 Impacted shared accounts\", SortOrder=3),\n(CyberArkCPMFailures | summarize Value=dcount(Safe) | extend Metric=\"🗄️ Impacted safes\", SortOrder=4)\n| order by SortOrder asc\n| project Metric, Value",
+              "size": 1,
+              "title": "CyberArk CPM failure KPI summary",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "tiles",
+              "tileSettings": {
+                "showBorder": false,
+                "titleContent": {
+                  "columnMatch": "Metric",
+                  "formatter": 1
+                },
+                "leftContent": {
+                  "columnMatch": "Value",
+                  "formatter": 12,
+                  "formatOptions": {
+                    "palette": "auto"
+                  },
+                  "numberFormat": {
+                    "unit": 17,
+                    "options": {
+                      "maximumSignificantDigits": 3,
+                      "maximumFractionDigits": 2
+                    }
+                  }
+                }
+              }
+            },
+            "name": "cpm-failure-kpis",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "CommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) == \"38\"\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend SharedAccount = tostring(DestinationUserName)\n| extend TriggerType = case(\n    Message has \"ImmediateTask\", \"ImmediateTask\",\n    Message has \"VerificationPeriod\", \"VerificationPeriod\",\n    \"Retry/Other\")\n| summarize\n    FirstSeen = min(TimeGenerated),\n    LastSeen = max(TimeGenerated),\n    Occurrences = count(),\n    HasImmediateTask = countif(TriggerType == \"ImmediateTask\") > 0\n    by DestinationHostName, SharedAccount, Safe\n| extend Priority = case(\n    HasImmediateTask, \"ALTA - uso reale (ImmediateTask), verificare con owner applicativo/piattaforma\",\n    Occurrences == 1, \"MEDIA - occorrenza isolata del job periodico, verificare se da rotazione CPM\",\n    \"BASSA - pattern ricorrente, coerente con reconciliation loop CyberArk (recon/cyberarklogon/pimgate)\")\n| project DestinationHostName, SharedAccount, Safe, FirstSeen, LastSeen, Occurrences, Priority\n| order by Priority asc, Occurrences desc",
+              "size": 0,
+              "title": "Verify Password Failures (Code 2114) - Priority Baseline",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "name": "cpm-verify-priority-baseline",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkCPMEvents =\nCommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) in (\"22\", \"24\", \"31\", \"38\", \"57\", \"60\", \"130\")\n| extend EventId = tostring(DeviceEventClassID)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend SharedAccount = tostring(DestinationUserName)\n| extend ActorUser = tostring(SourceUserName)\n| extend CPMOperation = case(\n    EventId in (\"24\", \"57\"), \"Change Password\",\n    EventId in (\"22\", \"38\"), \"Verify Password\",\n    EventId in (\"31\", \"60\"), \"Reconcile Password\",\n    EventId == \"130\", \"Disable Password\",\n    \"Other\")\n| extend CPMResult = case(\n    EventId in (\"22\", \"24\", \"31\"), \"Success\",\n    EventId in (\"38\", \"57\", \"60\", \"130\"), \"Failure\",\n    \"Unknown\")\n| extend CPMEventDescription = case(\n    EventId == \"24\", \"CPM Change Password\",\n    EventId == \"57\", \"CPM Change Password Failed\",\n    EventId == \"22\", \"CPM Verify Password\",\n    EventId == \"38\", \"CPM Verify Password Failed\",\n    EventId == \"31\", \"CPM Reconcile Password\",\n    EventId == \"60\", \"CPM Reconcile Password Failed\",\n    EventId == \"130\", \"CPM Disable Password Failed\",\n    Activity)\n| extend ErrorText = strcat(tostring(Message), \" \", tostring(Reason), \" \", tostring(AdditionalExtensions), \" \", tostring(DeviceCustomString1), \" \", tostring(DeviceCustomString2), \" \", tostring(DeviceCustomString3), \" \", tostring(DeviceCustomString4), \" \", tostring(DeviceCustomString5), \" \", tostring(DeviceCustomString6));\nlet CyberArkCPMFailures = CyberArkCPMEvents\n| where CPMResult == \"Failure\";\nCyberArkCPMFailures\n| summarize ErrorEvents=count() by bin(TimeGenerated, 1d), CPMEventDescription\n| order by TimeGenerated asc",
+              "size": 0,
+              "title": "CyberArk CPM failures over time",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "timechart"
+            },
+            "customWidth": "50",
+            "name": "cpm-failures-trend",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkCPMEvents =\nCommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) in (\"22\", \"24\", \"31\", \"38\", \"57\", \"60\", \"130\")\n| extend EventId = tostring(DeviceEventClassID)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend SharedAccount = tostring(DestinationUserName)\n| extend ActorUser = tostring(SourceUserName)\n| extend CPMOperation = case(\n    EventId in (\"24\", \"57\"), \"Change Password\",\n    EventId in (\"22\", \"38\"), \"Verify Password\",\n    EventId in (\"31\", \"60\"), \"Reconcile Password\",\n    EventId == \"130\", \"Disable Password\",\n    \"Other\")\n| extend CPMResult = case(\n    EventId in (\"22\", \"24\", \"31\"), \"Success\",\n    EventId in (\"38\", \"57\", \"60\", \"130\"), \"Failure\",\n    \"Unknown\")\n| extend CPMEventDescription = case(\n    EventId == \"24\", \"CPM Change Password\",\n    EventId == \"57\", \"CPM Change Password Failed\",\n    EventId == \"22\", \"CPM Verify Password\",\n    EventId == \"38\", \"CPM Verify Password Failed\",\n    EventId == \"31\", \"CPM Reconcile Password\",\n    EventId == \"60\", \"CPM Reconcile Password Failed\",\n    EventId == \"130\", \"CPM Disable Password Failed\",\n    Activity)\n| extend ErrorText = strcat(tostring(Message), \" \", tostring(Reason), \" \", tostring(AdditionalExtensions), \" \", tostring(DeviceCustomString1), \" \", tostring(DeviceCustomString2), \" \", tostring(DeviceCustomString3), \" \", tostring(DeviceCustomString4), \" \", tostring(DeviceCustomString5), \" \", tostring(DeviceCustomString6));\nlet CyberArkCPMFailures = CyberArkCPMEvents\n| where CPMResult == \"Failure\";\nCyberArkCPMEvents\n| summarize Events=count() by CPMOperation, CPMResult\n| order by CPMOperation asc, CPMResult asc",
+              "size": 0,
+              "title": "CyberArk CPM success vs failure by operation",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces",
+              "visualization": "barchart"
+            },
+            "customWidth": "50",
+            "name": "cpm-success-failure",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkCPMEvents =\nCommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) in (\"22\", \"24\", \"31\", \"38\", \"57\", \"60\", \"130\")\n| extend EventId = tostring(DeviceEventClassID)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend SharedAccount = tostring(DestinationUserName)\n| extend ActorUser = tostring(SourceUserName)\n| extend CPMOperation = case(\n    EventId in (\"24\", \"57\"), \"Change Password\",\n    EventId in (\"22\", \"38\"), \"Verify Password\",\n    EventId in (\"31\", \"60\"), \"Reconcile Password\",\n    EventId == \"130\", \"Disable Password\",\n    \"Other\")\n| extend CPMResult = case(\n    EventId in (\"22\", \"24\", \"31\"), \"Success\",\n    EventId in (\"38\", \"57\", \"60\", \"130\"), \"Failure\",\n    \"Unknown\")\n| extend CPMEventDescription = case(\n    EventId == \"24\", \"CPM Change Password\",\n    EventId == \"57\", \"CPM Change Password Failed\",\n    EventId == \"22\", \"CPM Verify Password\",\n    EventId == \"38\", \"CPM Verify Password Failed\",\n    EventId == \"31\", \"CPM Reconcile Password\",\n    EventId == \"60\", \"CPM Reconcile Password Failed\",\n    EventId == \"130\", \"CPM Disable Password Failed\",\n    Activity)\n| extend ErrorText = strcat(tostring(Message), \" \", tostring(Reason), \" \", tostring(AdditionalExtensions), \" \", tostring(DeviceCustomString1), \" \", tostring(DeviceCustomString2), \" \", tostring(DeviceCustomString3), \" \", tostring(DeviceCustomString4), \" \", tostring(DeviceCustomString5), \" \", tostring(DeviceCustomString6));\nlet CyberArkCPMFailures = CyberArkCPMEvents\n| where CPMResult == \"Failure\";\nCyberArkCPMFailures\n| where isnotempty(SharedAccount) and SharedAccount !in~ (\"Unknown\", \"-\")\n| summarize ErrorEvents=count(), FailedChangeEvents=countif(EventId == \"57\"), FailedVerifyEvents=countif(EventId == \"38\"), FailedReconcileEvents=countif(EventId == \"60\"), FailedDisableEvents=countif(EventId == \"130\"), FirstSeen=min(TimeGenerated), LastSeen=max(TimeGenerated), SampleActor=any(ActorUser), SampleActivity=any(Activity), SampleDeviceAction=any(DeviceAction), SampleMessage=any(Message), SampleErrorText=any(ErrorText) by Safe, SharedAccount\n| order by ErrorEvents desc",
+              "size": 0,
+              "title": "CyberArk CPM errors by shared account",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "name": "cpm-errors-by-shared-account",
+            "styleSettings": {
+              "showBorder": true
+            }
+          },
+          {
+            "type": 3,
+            "content": {
+              "version": "KqlItem/1.0",
+              "query": "let CyberArkCPMEvents =\nCommonSecurityLog\n| where TimeGenerated >= {TimeRange:start}\n| where DeviceVendor =~ \"Cyber-Ark\"\n| where DeviceProduct =~ \"Vault\"\n| where tostring(DeviceEventClassID) in (\"22\", \"24\", \"31\", \"38\", \"57\", \"60\", \"130\")\n| extend EventId = tostring(DeviceEventClassID)\n| extend Safe = tostring(DestinationUserPrivileges)\n| extend SharedAccount = tostring(DestinationUserName)\n| extend ActorUser = tostring(SourceUserName)\n| extend CPMOperation = case(\n    EventId in (\"24\", \"57\"), \"Change Password\",\n    EventId in (\"22\", \"38\"), \"Verify Password\",\n    EventId in (\"31\", \"60\"), \"Reconcile Password\",\n    EventId == \"130\", \"Disable Password\",\n    \"Other\")\n| extend CPMResult = case(\n    EventId in (\"22\", \"24\", \"31\"), \"Success\",\n    EventId in (\"38\", \"57\", \"60\", \"130\"), \"Failure\",\n    \"Unknown\")\n| extend CPMEventDescription = case(\n    EventId == \"24\", \"CPM Change Password\",\n    EventId == \"57\", \"CPM Change Password Failed\",\n    EventId == \"22\", \"CPM Verify Password\",\n    EventId == \"38\", \"CPM Verify Password Failed\",\n    EventId == \"31\", \"CPM Reconcile Password\",\n    EventId == \"60\", \"CPM Reconcile Password Failed\",\n    EventId == \"130\", \"CPM Disable Password Failed\",\n    Activity)\n| extend ErrorText = strcat(tostring(Message), \" \", tostring(Reason), \" \", tostring(AdditionalExtensions), \" \", tostring(DeviceCustomString1), \" \", tostring(DeviceCustomString2), \" \", tostring(DeviceCustomString3), \" \", tostring(DeviceCustomString4), \" \", tostring(DeviceCustomString5), \" \", tostring(DeviceCustomString6));\nlet CyberArkCPMFailures = CyberArkCPMEvents\n| where CPMResult == \"Failure\";\nCyberArkCPMEvents\n| where EventId == \"57\"\n| project TimeGenerated, Safe, SharedAccount, ActorUser, Activity, DeviceAction, Message, Reason, AdditionalExtensions, ErrorText\n| order by TimeGenerated desc",
+              "size": 0,
+              "title": "CPM Change Password Failed - event details",
+              "noDataMessage": "No data found.",
+              "noDataMessageStyle": 3,
+              "timeContextFromParameter": "TimeRange",
+              "queryType": 0,
+              "resourceType": "microsoft.operationalinsights/workspaces"
+            },
+            "name": "cpm-change-password-failed-details",
+            "styleSettings": {
+              "showBorder": true
+            }
+          }
+        ]
+      },
+      "conditionalVisibility": {
+        "parameterName": "MainTab",
+        "comparison": "isEqualTo",
+        "value": "PasswordEvents"
+      },
+      "name": "group-password-events"
+    }
+  ],
+  "fallbackResourceIds": [
+    "/subscriptions/e54869c2-4d1e-4639-b446-30848781c89d/resourcegroups/az-northita-prod-2057-rg-001/providers/microsoft.operationalinsights/workspaces/az-northita-prod-2057-log-001"
+  ],
+  "fromTemplateId": "sentinel-UserWorkbook",
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
