@@ -1,29 +1,3 @@
-// ASIM Authentication parser for CyberArk Vault (PAS) CEF/CommonSecurityLog events.
-// Source table: CommonSecurityLog, DeviceVendor "Cyber-Ark", DeviceProduct "Vault".
-//
-// Unlike F5 APM, one CommonSecurityLog row here is already one complete event —
-// no multi-line correlation needed. The Vault emits ~27 distinct Activity values
-// (password retrieval, PSM session recording, CPM password rotation, etc.); only
-// three are actual Authentication-schema events, found by inspecting real samples:
-//   - Activity == "Logon"                        -> successful login to the Vault
-//   - Activity == "Logoff"                        -> logout from the Vault
-//   - Activity == "Failure: User Authentication"  -> failed login
-// CyberArk consistently prefixes failed operations with "Failure: ", which is
-// used generically to derive EventResult.
-//
-// The failure event carries no specific reason code (Message is just "Failure: "
-// plus a stray control character in the sample data), so EventResultDetails for
-// a Failure is "Other" rather than a guessed specific reason the source data
-// doesn't support - same honesty rule applied to the F5 parser.
-//
-// SourceTranslatedAddress (not SourceIP, which is empty in this environment's
-// data) carries the real client IP for this connector's field mapping.
-//
-// EventUid uses _ItemId (Log Analytics' per-row unique identifier), not
-// _ResourceId: _ResourceId identifies the collector VM that forwarded the
-// log, not the individual event, so many unrelated events from the same
-// collector share it - confirmed against real data, where a single
-// _ResourceId value was shared by ~45,000 distinct rows.
 let ASimAuthenticationCyberArkVault = (disabled: bool = false) {
     CommonSecurityLog
     | where not(disabled)

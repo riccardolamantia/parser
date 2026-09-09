@@ -1,43 +1,3 @@
-// ASIM Authentication parser for F5 BIG-IP APM (Access Policy Manager) syslog events.
-// Source table: Syslog. Produces two record shapes per correlated session: one
-// EventType="Logon" row and, once the session ends, one EventType="Logoff" row —
-// callers counting/filtering by session should expect up to 2 rows per real session.
-//
-// F5 APM does not emit one syslog line per login — each line reports a single
-// session-variable change or access-policy step. This parser correlates every
-// line that shares the same APM session ID (the 8-hex-char token that always
-// follows ":Common:", e.g. "...:Common:7e365591...") into ASIM Authentication
-// records. The SessionId is pulled out with a fixed {8} regex rather than
-// "everything up to the next ': '", because some lines invoke a shared macro
-// policy and read "...:Common:<id>:/Common/<macro>: text" — capturing up to
-// the next colon-space there would swallow the macro path into SessionId and
-// split one real session into two correlation groups. Field extraction runs
-// directly on the raw SyslogMessage (not on a pre-sliced tail) so the same
-// macro-path variant can't break it either.
-//
-// SrcIpAddr comes from "New session from client IP <ip> ... at VIP ... Listener
-// ..." — written when the connection first arrives, before authentication.
-// This line is deliberately matched without the ProcessName filter used below,
-// because (confirmed against a working hand-written parser already in this
-// workspace) it is not reliably logged under apmd/authd like the auth messages
-// are. Using it instead of the 'session.user.clientip' session variable (which
-// is only set *after* a successful logon continues past the logon page) is
-// what gives Success **and** Failure rows a populated SrcIpAddr — the earlier
-// version of this parser could only ever get the IP on successful logons.
-//
-// Session end / logoff comes from "Session deleted (<reason>)" lines, again
-// matched without a ProcessName restriction for the same reason.
-//
-// Built from real F5 Snam data covering: successful and failed RADIUS auth
-// (msg 01490058), the final access-policy outcome ("terminalout 'Allow'/
-// 'Deny'"), and the username variable ("Username 'X'"). The RADIUS reject
-// only carries a generic "Access-Reject" with no reason code, so
-// EventResultDetails for a Failure is "Other" rather than a guessed specific
-// reason (e.g. "Incorrect password") the source data doesn't actually support.
-//
-// Sessions run for hours, so a query over a short time range will show many
-// sessions without their logon event yet (no Success/Failure/Allow/Deny
-// signal) — that shows up as EventResult="NA" and is expected, not a bug.
 let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
     let SessionClientIps = Syslog
         | where not(disabled)
@@ -96,8 +56,6 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
                 ""
             ),
             EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
-            // ASIM EventCount is typed `int`; an untyped literal like `1` is inferred
-            // as `long` by KQL and fails schema validation, so cast explicitly.
             EventCount = toint(1),
             LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
             TargetUsernameType = case(
@@ -119,22 +77,12 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             TargetSessionId = SessionId,
             Dst = Dvc,
             Src = SrcIpAddr,
-            // HostIP is the F5 device's own IP on the Syslog table; the connector
-            // sometimes reports it as the literal string "Unknown IP" instead of
-            // leaving it empty, which needs filtering out explicitly.
             DvcIpAddr = iff(RawHostIp == "Unknown IP", "", RawHostIp),
             DvcHostname = Dvc,
             TargetHostname = Dvc,
             DvcDomain = extract(@"^[^.]+\.(.+)$", 1, Dvc),
             DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
             Type = "Syslog";
-    // Inner join, and only against successful logons: "Session deleted" fires for
-    // ANY abandoned session object, including ones whose logon attempt failed or
-    // never happened (APM garbage-collects them a few minutes later) - confirmed
-    // against a real failed session that got a "Session deleted" 5 minutes after
-    // its failed logon, with no successful auth in between. Reporting that as a
-    // Logoff would falsely imply the user got in; only sessions that actually
-    // reached EventResult="Success" represent a real logon-then-logoff pair.
     let LogoffEvents = SessionEnds
         | join kind=inner (
             LogonEvents

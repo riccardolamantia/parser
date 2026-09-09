@@ -1,11 +1,3 @@
-// Parameterized (vim) variant of ASimAuthenticationF5BigIpAPM.
-// Same session-correlation logic (see ASimAuthenticationF5BigIpAPM.kql for full
-// details — SessionId's fixed {8}-hex regex, why SrcIpAddr comes from "New
-// session from client IP" rather than the session variable, and why "Session
-// deleted" produces a second EventType="Logoff" row per session), with
-// standard ASIM filtering parameters added. Time filters run before each base
-// Syslog read; the remaining filters run after the union, since TargetUsername,
-// SrcIpAddr and EventResult only exist once lines for a session are merged.
 let vimAuthenticationF5BigIpAPM = (
         starttime: datetime = datetime(null),
         endtime: datetime = datetime(null),
@@ -77,8 +69,6 @@ let vimAuthenticationF5BigIpAPM = (
                 ""
             ),
             EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
-            // ASIM EventCount is typed `int`; an untyped literal like `1` is inferred
-            // as `long` by KQL and fails schema validation, so cast explicitly.
             EventCount = toint(1),
             LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
             TargetUsernameType = case(
@@ -100,22 +90,12 @@ let vimAuthenticationF5BigIpAPM = (
             TargetSessionId = SessionId,
             Dst = Dvc,
             Src = SrcIpAddr,
-            // HostIP is the F5 device's own IP on the Syslog table; the connector
-            // sometimes reports it as the literal string "Unknown IP" instead of
-            // leaving it empty, which needs filtering out explicitly.
             DvcIpAddr = iff(RawHostIp == "Unknown IP", "", RawHostIp),
             DvcHostname = Dvc,
             TargetHostname = Dvc,
             DvcDomain = extract(@"^[^.]+\.(.+)$", 1, Dvc),
             DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
             Type = "Syslog";
-    // Inner join, and only against successful logons: "Session deleted" fires for
-    // ANY abandoned session object, including ones whose logon attempt failed or
-    // never happened (APM garbage-collects them a few minutes later) - confirmed
-    // against a real failed session that got a "Session deleted" 5 minutes after
-    // its failed logon, with no successful auth in between. Reporting that as a
-    // Logoff would falsely imply the user got in; only sessions that actually
-    // reached EventResult="Success" represent a real logon-then-logoff pair.
     let LogoffEvents = SessionEnds
         | join kind=inner (
             LogonEvents
