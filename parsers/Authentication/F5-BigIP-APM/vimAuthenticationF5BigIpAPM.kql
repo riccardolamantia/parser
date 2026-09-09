@@ -91,9 +91,10 @@ let vimAuthenticationF5BigIpAPM = (
             Dst = Dvc,
             Src = SrcIpAddr,
             DvcIpAddr = iff(RawHostIp == "Unknown IP", "", RawHostIp),
-            DvcHostname = Dvc,
-            TargetHostname = Dvc,
+            DvcHostname = extract(@"^([^.]+)", 1, Dvc),
+            TargetHostname = extract(@"^([^.]+)", 1, Dvc),
             DvcDomain = extract(@"^[^.]+\.(.+)$", 1, Dvc),
+            DvcDomainType = "FQDN",
             DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
             Type = "Syslog";
     let LogoffEvents = SessionEnds
@@ -149,6 +150,7 @@ let vimAuthenticationF5BigIpAPM = (
         DvcIpAddr,
         DvcHostname,
         DvcDomain,
+        DvcDomainType,
         DvcAction,
         Dst,
         TargetUsername,
