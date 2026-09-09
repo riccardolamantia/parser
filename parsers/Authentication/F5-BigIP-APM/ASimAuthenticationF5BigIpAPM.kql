@@ -65,6 +65,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             ),
             TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
             TargetAppName = PolicyName,
+            TargetAppType = "Resource",
             LogonTarget = PolicyName,
             LogonProtocol = "SSL-VPN",
             EventType = "Logon",
@@ -88,7 +89,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         | join kind=inner (
             LogonEvents
             | where EventResult == "Success"
-            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetAppName, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
+            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetAppName, TargetAppType, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
         ) on SessionId
         | extend
             EventStartTime = LogoffTime,
@@ -142,6 +143,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         TargetDomain,
         TargetHostname,
         TargetAppName,
+        TargetAppType,
         LogonTarget,
         LogonProtocol,
         LogonMethod,
