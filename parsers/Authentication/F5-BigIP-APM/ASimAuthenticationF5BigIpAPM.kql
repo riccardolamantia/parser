@@ -64,6 +64,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
                 "Simple"
             ),
             TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
+            TargetDomainType = iff(TargetUsername has "\\", "Windows", ""),
             TargetAppName = PolicyName,
             TargetAppType = "Resource",
             LogonTarget = PolicyName,
@@ -89,7 +90,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         | join kind=inner (
             LogonEvents
             | where EventResult == "Success"
-            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetAppName, TargetAppType, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
+            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetDomainType, TargetAppName, TargetAppType, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
         ) on SessionId
         | extend
             EventStartTime = LogoffTime,
@@ -115,6 +116,9 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             Type = "Syslog";
     LogonEvents
     | union LogoffEvents
+    | extend
+        Application = TargetAppName,
+        IpAddr = SrcIpAddr
     | project
         TimeGenerated = EventEndTime,
         EventStartTime,
@@ -141,6 +145,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         TargetUsername,
         TargetUsernameType,
         TargetDomain,
+        TargetDomainType,
         TargetHostname,
         TargetAppName,
         TargetAppType,
@@ -149,5 +154,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         LogonMethod,
         SrcIpAddr,
         Src,
+        Application,
+        IpAddr,
         Type
 };

@@ -77,6 +77,7 @@ let vimAuthenticationF5BigIpAPM = (
                 "Simple"
             ),
             TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
+            TargetDomainType = iff(TargetUsername has "\\", "Windows", ""),
             TargetAppName = PolicyName,
             TargetAppType = "Resource",
             LogonTarget = PolicyName,
@@ -102,7 +103,7 @@ let vimAuthenticationF5BigIpAPM = (
         | join kind=inner (
             LogonEvents
             | where EventResult == "Success"
-            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetAppName, TargetAppType, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
+            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetDomainType, TargetAppName, TargetAppType, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
         ) on SessionId
         | extend
             EventStartTime = LogoffTime,
@@ -131,6 +132,9 @@ let vimAuthenticationF5BigIpAPM = (
     | where targetusername_has == "" or TargetUsername has targetusername_has
     | where array_length(srcipaddr_has_any_prefix) == 0 or SrcIpAddr has_any (srcipaddr_has_any_prefix)
     | where array_length(eventresult_in) == 0 or EventResult in (eventresult_in)
+    | extend
+        Application = TargetAppName,
+        IpAddr = SrcIpAddr
     | project
         TimeGenerated = EventEndTime,
         EventStartTime,
@@ -157,6 +161,7 @@ let vimAuthenticationF5BigIpAPM = (
         TargetUsername,
         TargetUsernameType,
         TargetDomain,
+        TargetDomainType,
         TargetHostname,
         TargetAppName,
         TargetAppType,
@@ -165,5 +170,7 @@ let vimAuthenticationF5BigIpAPM = (
         LogonMethod,
         SrcIpAddr,
         Src,
+        Application,
+        IpAddr,
         Type
 };
