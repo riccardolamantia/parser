@@ -1,0 +1,85 @@
+let vimAuthenticationCyberArkPrivilegeCloudIdentity = (
+        starttime: datetime = datetime(null),
+        endtime: datetime = datetime(null),
+        targetusername_has: string = "",
+        srcipaddr_has_any_prefix: dynamic = dynamic([]),
+        eventresult_in: dynamic = dynamic([]),
+        disabled: bool = false
+    ) {
+    CyberArk_AuditEvents_CL
+    | where not(disabled)
+    | where isnull(starttime) or TimeGenerated >= starttime
+    | where isnull(endtime) or TimeGenerated <= endtime
+    | where component == "Identity"
+    | where message in ("cloud.core.login", "cloud.core.logout", "cloud.core.loginfail")
+    | extend CustomJson = parse_json(customData)
+    | mv-apply item = CustomJson.nested_items on (
+        summarize CustomFields = make_bag(pack(tostring(item.name), item.value))
+    )
+    | extend
+        EventType = iff(message == "cloud.core.logout", "Logoff", "Logon"),
+        EventResult = iff(message == "cloud.core.loginfail", "Failure", "Success")
+    | extend
+        EventResultDetails = iff(EventResult == "Failure", coalesce(tostring(CustomFields.failure_reason), "Other"), ""),
+        EventSeverity = iff(EventResult == "Failure", "Low", "Informational"),
+        TargetUsername = username,
+        TargetUsernameType = "UPN",
+        SrcIpAddr = tostring(CustomFields.source_ip_address),
+        DvcIpAddr = tostring(CustomFields.hostname),
+        LogonMethod = iff(tostring(CustomFields.authentication_method) == "MultiAuth", "Multi factor authentication", "Username & Password"),
+        LogonProtocol = "HTTPS",
+        EventStartTime = TimeGenerated,
+        EventEndTime = TimeGenerated,
+        EventSchema = "Authentication",
+        EventSchemaVersion = "0.1.4",
+        EventVendor = "CyberArk",
+        EventProduct = "Identity",
+        EventSubType = "Remote",
+        TargetAppName = "CyberArk Privilege Cloud",
+        TargetAppType = "SaaS application",
+        LogonTarget = "CyberArk Privilege Cloud",
+        EventUid = tostring(hash_sha256(strcat(tostring(TimeGenerated), userId, message, tostring(CustomFields.session_guid)))),
+        EventCount = toint(1),
+        Type = "CyberArk_AuditEvents_CL"
+    | extend
+        Dvc = DvcIpAddr,
+        Dst = TargetAppName,
+        Src = SrcIpAddr,
+        DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
+        Application = TargetAppName,
+        IpAddr = SrcIpAddr
+    | where targetusername_has == "" or TargetUsername has targetusername_has
+    | where array_length(srcipaddr_has_any_prefix) == 0 or SrcIpAddr has_any (srcipaddr_has_any_prefix)
+    | where array_length(eventresult_in) == 0 or EventResult in (eventresult_in)
+    | project
+        TimeGenerated,
+        EventStartTime,
+        EventEndTime,
+        EventCount,
+        EventType,
+        EventSubType,
+        EventResult,
+        EventResultDetails,
+        EventSeverity,
+        EventSchema,
+        EventSchemaVersion,
+        EventVendor,
+        EventProduct,
+        EventUid,
+        Dvc,
+        DvcIpAddr,
+        DvcAction,
+        Dst,
+        TargetUsername,
+        TargetUsernameType,
+        TargetAppName,
+        TargetAppType,
+        LogonTarget,
+        LogonMethod,
+        LogonProtocol,
+        SrcIpAddr,
+        Src,
+        Application,
+        IpAddr,
+        Type
+};

@@ -1,0 +1,176 @@
+let vimAuthenticationF5BigIpAPM = (
+        starttime: datetime = datetime(null),
+        endtime: datetime = datetime(null),
+        targetusername_has: string = "",
+        srcipaddr_has_any_prefix: dynamic = dynamic([]),
+        eventresult_in: dynamic = dynamic([]),
+        disabled: bool = false
+    ) {
+    let SessionClientIps = Syslog
+        | where not(disabled)
+        | where isnull(starttime) or TimeGenerated >= starttime
+        | where isnull(endtime) or TimeGenerated <= endtime
+        | where SyslogMessage has "New session from client IP"
+        | extend
+            SessionId = extract(@":Common:([0-9a-f]{8}):", 1, SyslogMessage),
+            ClientIp = extract(@"New session from client IP (\S+)", 1, SyslogMessage)
+        | where isnotempty(SessionId) and isnotempty(ClientIp)
+        | summarize SrcIpAddr = take_any(ClientIp) by SessionId;
+    let SessionEnds = Syslog
+        | where not(disabled)
+        | where isnull(starttime) or TimeGenerated >= starttime
+        | where isnull(endtime) or TimeGenerated <= endtime
+        | where SyslogMessage has "Session deleted"
+        | extend
+            SessionId = extract(@":Common:([0-9a-f]{8}):", 1, SyslogMessage),
+            SessionDeletedReason = extract(@"Session deleted\s*\(([^)]+)\)", 1, SyslogMessage)
+        | where isnotempty(SessionId)
+        | summarize LogoffTime = max(TimeGenerated), Dvc = any(Computer), SessionDeletedReason = take_any(SessionDeletedReason) by SessionId;
+    let RawEvents = Syslog
+        | where not(disabled)
+        | where isnull(starttime) or TimeGenerated >= starttime
+        | where isnull(endtime) or TimeGenerated <= endtime
+        | where ProcessName in~ ("apmd", "authd")
+        | extend
+            PolicyName = extract(@"/Common/([^:]+):Common:", 1, SyslogMessage),
+            SessionId = extract(@":Common:([0-9a-f]{8})", 1, SyslogMessage),
+            AuthUsername = extract(@"authenticate with '([^']+)' (successfully|failed)", 1, SyslogMessage),
+            AuthOutcome = extract(@"authenticate with '([^']+)' (successfully|failed)", 2, SyslogMessage),
+            SessionUsername = extract(@"Username '([^']+)'$", 1, SyslogMessage),
+            SessionTerminalOut = extract(@"terminalout '([^']+)'$", 1, SyslogMessage)
+        | where isnotempty(SessionId);
+    let LogonEvents = RawEvents
+        | summarize
+            EventStartTime = min(TimeGenerated),
+            EventEndTime = max(TimeGenerated),
+            RawLineCount = count(),
+            Dvc = any(Computer),
+            RawHostIp = any(HostIP),
+            AuthUsername = take_anyif(AuthUsername, isnotempty(AuthUsername)),
+            SessionUsername = take_anyif(SessionUsername, isnotempty(SessionUsername)),
+            AuthSuccessCount = countif(AuthOutcome =~ "successfully"),
+            AuthFailureCount = countif(AuthOutcome =~ "failed"),
+            (LastTerminalOutTime, LastTerminalOut) = arg_max(iff(isnotempty(SessionTerminalOut), TimeGenerated, datetime(null)), SessionTerminalOut)
+            by SessionId, PolicyName
+        | lookup kind=leftouter SessionClientIps on SessionId
+        | extend
+            TargetUsername = coalesce(AuthUsername, SessionUsername),
+            EventResult = case(
+                AuthFailureCount > 0, "Failure",
+                LastTerminalOut =~ "Deny", "Failure",
+                AuthSuccessCount > 0, "Success",
+                LastTerminalOut =~ "Allow", "Success",
+                "NA"
+            )
+        | extend
+            EventResultDetails = case(
+                AuthFailureCount > 0, "Other",
+                LastTerminalOut =~ "Deny", "Logon violates policy",
+                ""
+            ),
+            EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
+            EventCount = toint(1),
+            LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
+            TargetUsernameType = case(
+                TargetUsername has "\\", "Windows",
+                TargetUsername has "@", "UPN",
+                "Simple"
+            ),
+            TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
+            TargetDomainType = iff(TargetUsername has "\\", "Windows", ""),
+            TargetAppName = PolicyName,
+            TargetAppType = "Resource",
+            LogonTarget = PolicyName,
+            LogonProtocol = "SSL-VPN",
+            EventType = "Logon",
+            EventSubType = "Remote",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.4",
+            EventVendor = "F5",
+            EventProduct = "BIG-IP APM",
+            EventUid = SessionId,
+            TargetSessionId = SessionId,
+            Dst = Dvc,
+            Src = SrcIpAddr,
+            DvcIpAddr = iff(RawHostIp == "Unknown IP", "", RawHostIp),
+            DvcHostname = extract(@"^([^.]+)", 1, Dvc),
+            TargetHostname = extract(@"^([^.]+)", 1, Dvc),
+            DvcDomain = extract(@"^[^.]+\.(.+)$", 1, Dvc),
+            DvcDomainType = "FQDN",
+            DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
+            Type = "Syslog";
+    let LogoffEvents = SessionEnds
+        | join kind=inner (
+            LogonEvents
+            | where EventResult == "Success"
+            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetDomainType, TargetAppName, TargetAppType, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
+        ) on SessionId
+        | extend
+            EventStartTime = LogoffTime,
+            EventEndTime = LogoffTime,
+            EventCount = toint(1),
+            EventType = "Logoff",
+            EventSubType = "Remote",
+            EventResult = "Success",
+            EventResultDetails = case(
+                SessionDeletedReason has_any ("user inactivity", "timeout"), "Session expired",
+                isempty(SessionDeletedReason) or SessionDeletedReason has "user_initiated", "",
+                "Other"
+            ),
+            EventSeverity = "Informational",
+            EventSchema = "Authentication",
+            EventSchemaVersion = "0.1.4",
+            EventVendor = "F5",
+            EventProduct = "BIG-IP APM",
+            EventUid = SessionId,
+            TargetSessionId = SessionId,
+            LogonProtocol = coalesce(LogonProtocol, "SSL-VPN"),
+            DvcAction = "Allowed",
+            Type = "Syslog";
+    LogonEvents
+    | union LogoffEvents
+    | where targetusername_has == "" or TargetUsername has targetusername_has
+    | where array_length(srcipaddr_has_any_prefix) == 0 or SrcIpAddr has_any (srcipaddr_has_any_prefix)
+    | where array_length(eventresult_in) == 0 or EventResult in (eventresult_in)
+    | extend
+        Application = TargetAppName,
+        IpAddr = SrcIpAddr
+    | project
+        TimeGenerated = EventEndTime,
+        EventStartTime,
+        EventEndTime,
+        EventCount,
+        EventType,
+        EventSubType,
+        EventResult,
+        EventResultDetails,
+        EventSeverity,
+        EventSchema,
+        EventSchemaVersion,
+        EventVendor,
+        EventProduct,
+        EventUid,
+        TargetSessionId,
+        Dvc,
+        DvcIpAddr,
+        DvcHostname,
+        DvcDomain,
+        DvcDomainType,
+        DvcAction,
+        Dst,
+        TargetUsername,
+        TargetUsernameType,
+        TargetDomain,
+        TargetDomainType,
+        TargetHostname,
+        TargetAppName,
+        TargetAppType,
+        LogonTarget,
+        LogonProtocol,
+        LogonMethod,
+        SrcIpAddr,
+        Src,
+        Application,
+        IpAddr,
+        Type
+};
