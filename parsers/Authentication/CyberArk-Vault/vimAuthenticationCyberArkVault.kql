@@ -27,11 +27,16 @@ let vimAuthenticationCyberArkVault = (
             TargetUsername has "@", "UPN",
             "Simple"
         ),
+        TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
+        TargetDomainType = iff(TargetUsername has "\\", "Windows", ""),
         Dvc = coalesce(Computer, DvcIpAddr),
+        DvcHostname = iff(isnotempty(Computer), extract(@"^([^.]+)", 1, Computer), ""),
+        DvcDomain = iff(isnotempty(Computer), extract(@"^[^.]+\.(.+)$", 1, Computer), ""),
         TargetAppName = "CyberArk Vault",
+        TargetAppType = "Service",
         LogonTarget = "CyberArk Vault",
         EventUid = _ItemId,
-        EventCount = 1,
+        EventCount = toint(1),
         EventStartTime = TimeGenerated,
         EventEndTime = TimeGenerated,
         EventSchema = "Authentication",
@@ -42,7 +47,12 @@ let vimAuthenticationCyberArkVault = (
         Type = "CommonSecurityLog"
     | extend
         Dst = Dvc,
-        Src = SrcIpAddr
+        Src = SrcIpAddr,
+        TargetHostname = DvcHostname,
+        DvcDomainType = iff(isnotempty(DvcDomain), "FQDN", ""),
+        DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
+        Application = TargetAppName,
+        IpAddr = SrcIpAddr
     | where targetusername_has == "" or TargetUsername has targetusername_has
     | where array_length(srcipaddr_has_any_prefix) == 0 or SrcIpAddr has_any (srcipaddr_has_any_prefix)
     | where array_length(eventresult_in) == 0 or EventResult in (eventresult_in)
@@ -63,12 +73,22 @@ let vimAuthenticationCyberArkVault = (
         EventUid,
         Dvc,
         DvcIpAddr,
+        DvcHostname,
+        DvcDomain,
+        DvcDomainType,
+        DvcAction,
         Dst,
         TargetUsername,
         TargetUsernameType,
+        TargetDomain,
+        TargetDomainType,
+        TargetHostname,
         TargetAppName,
+        TargetAppType,
         LogonTarget,
         SrcIpAddr,
         Src,
+        Application,
+        IpAddr,
         Type
 };

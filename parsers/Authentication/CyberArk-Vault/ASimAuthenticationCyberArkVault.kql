@@ -18,11 +18,16 @@ let ASimAuthenticationCyberArkVault = (disabled: bool = false) {
             TargetUsername has "@", "UPN",
             "Simple"
         ),
+        TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
+        TargetDomainType = iff(TargetUsername has "\\", "Windows", ""),
         Dvc = coalesce(Computer, DvcIpAddr),
+        DvcHostname = iff(isnotempty(Computer), extract(@"^([^.]+)", 1, Computer), ""),
+        DvcDomain = iff(isnotempty(Computer), extract(@"^[^.]+\.(.+)$", 1, Computer), ""),
         TargetAppName = "CyberArk Vault",
+        TargetAppType = "Service",
         LogonTarget = "CyberArk Vault",
         EventUid = _ItemId,
-        EventCount = 1,
+        EventCount = toint(1),
         EventStartTime = TimeGenerated,
         EventEndTime = TimeGenerated,
         EventSchema = "Authentication",
@@ -33,7 +38,12 @@ let ASimAuthenticationCyberArkVault = (disabled: bool = false) {
         Type = "CommonSecurityLog"
     | extend
         Dst = Dvc,
-        Src = SrcIpAddr
+        Src = SrcIpAddr,
+        TargetHostname = DvcHostname,
+        DvcDomainType = iff(isnotempty(DvcDomain), "FQDN", ""),
+        DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
+        Application = TargetAppName,
+        IpAddr = SrcIpAddr
     | project
         TimeGenerated,
         EventStartTime,
@@ -51,12 +61,22 @@ let ASimAuthenticationCyberArkVault = (disabled: bool = false) {
         EventUid,
         Dvc,
         DvcIpAddr,
+        DvcHostname,
+        DvcDomain,
+        DvcDomainType,
+        DvcAction,
         Dst,
         TargetUsername,
         TargetUsernameType,
+        TargetDomain,
+        TargetDomainType,
+        TargetHostname,
         TargetAppName,
+        TargetAppType,
         LogonTarget,
         SrcIpAddr,
         Src,
+        Application,
+        IpAddr,
         Type
 };
