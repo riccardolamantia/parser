@@ -15,8 +15,8 @@ let ASimAuthenticationCrowdStrikeFalconHost = (disabled: bool = false) {
     | extend
         EventResult = iff(EventOutcome == "true", "Success", "Failure"),
         EventResultDetails = iff(EventOutcome == "true", "", "Other"),
-        EventStartTime = todatetime(DeviceCustomDate1),
-        EventEndTime = todatetime(DeviceCustomDate1),
+        EventStartTime = TimeGenerated,
+        EventEndTime = TimeGenerated,
         EventCount = toint(1),
         EventSchema = "Authentication",
         EventSchemaVersion = "0.1.4",
