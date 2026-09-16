@@ -1,0 +1,93 @@
+let ASimAuthenticationCrowdStrikeFalconHost = (disabled: bool = false) {
+    let EventSeverityLookup = datatable (LogSeverity: string, EventSeverity: string) [
+        "0", "Informational",
+        "1", "Informational",
+        "2", "Low",
+        "3", "Medium",
+        "4", "High",
+        "5", "High"
+    ];
+    CommonSecurityLog
+    | where not(disabled)
+    | where DeviceVendor == "CrowdStrike" and DeviceProduct == "FalconHost"
+    | where DeviceEventCategory == "AuthActivityAuditEvent" and DeviceEventClassID in ("userAuthenticate", "twoFactorAuthenticate")
+    | lookup EventSeverityLookup on LogSeverity
+    | extend
+        EventResult = iff(EventOutcome == "true", "Success", "Failure"),
+        EventResultDetails = iff(EventOutcome == "true", "", "Other"),
+        EventStartTime = todatetime(DeviceCustomDate1),
+        EventEndTime = todatetime(DeviceCustomDate1),
+        EventCount = toint(1),
+        EventSchema = "Authentication",
+        EventSchemaVersion = "0.1.4",
+        EventType = "Logon",
+        EventSubType = "Remote",
+        EventVendor = "CrowdStrike",
+        EventProduct = "FalconHost",
+        EventOriginalSeverity = LogSeverity,
+        EventOriginalSubType = DeviceEventClassID,
+        EventOriginalType = DeviceEventCategory,
+        EventOriginalResultDetails = EventOutcome,
+        EventProductVersion = DeviceVersion,
+        EventUid = _ItemId,
+        TargetUsername = DestinationUserName,
+        SrcIpAddr = DestinationTranslatedAddress,
+        TargetAppName = ProcessName,
+        Dvc = Computer
+    | extend
+        TargetUsernameType = _ASIM_GetUsernameType(TargetUsername),
+        TargetUserType = _ASIM_GetUserType(TargetUsername, ""),
+        TargetAppType = "SaaS application",
+        LogonTarget = TargetAppName,
+        LogonProtocol = "HTTPS",
+        LogonMethod = iff(EventOriginalSubType == "twoFactorAuthenticate", "Multi factor authentication", "Username & Password"),
+        DvcHostname = extract(@"^([^.]+)", 1, Dvc),
+        DvcDomain = extract(@"^[^.]+\.(.+)$", 1, Dvc)
+    | extend
+        DvcDomainType = iff(isnotempty(DvcDomain), "FQDN", ""),
+        DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
+        Dst = TargetAppName,
+        Src = SrcIpAddr,
+        Application = TargetAppName,
+        IpAddr = SrcIpAddr,
+        Type = "CommonSecurityLog"
+    | project
+        TimeGenerated,
+        EventStartTime,
+        EventEndTime,
+        EventCount,
+        EventType,
+        EventSubType,
+        EventResult,
+        EventResultDetails,
+        EventSeverity,
+        EventSchema,
+        EventSchemaVersion,
+        EventVendor,
+        EventProduct,
+        EventProductVersion,
+        EventOriginalSeverity,
+        EventOriginalSubType,
+        EventOriginalType,
+        EventOriginalResultDetails,
+        EventUid,
+        Dvc,
+        DvcHostname,
+        DvcDomain,
+        DvcDomainType,
+        DvcAction,
+        Dst,
+        TargetUsername,
+        TargetUsernameType,
+        TargetUserType,
+        TargetAppName,
+        TargetAppType,
+        LogonTarget,
+        LogonProtocol,
+        LogonMethod,
+        SrcIpAddr,
+        Src,
+        Application,
+        IpAddr,
+        Type
+};
