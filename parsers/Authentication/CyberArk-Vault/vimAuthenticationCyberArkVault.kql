@@ -22,11 +22,8 @@ let vimAuthenticationCyberArkVault = (
         SrcIpAddr = coalesce(SourceIP, SourceTranslatedAddress),
         DvcIpAddr = DeviceAddress
     | extend
-        TargetUsernameType = case(
-            TargetUsername has "\\", "Windows",
-            TargetUsername has "@", "UPN",
-            "Simple"
-        ),
+        TargetUsernameType = _ASIM_GetUsernameType(TargetUsername),
+        TargetUserType = _ASIM_GetUserType(TargetUsername, ""),
         TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
         TargetDomainType = iff(TargetUsername has "\\", "Windows", ""),
         Dvc = coalesce(Computer, DvcIpAddr),
@@ -80,6 +77,7 @@ let vimAuthenticationCyberArkVault = (
         Dst,
         TargetUsername,
         TargetUsernameType,
+        TargetUserType,
         TargetDomain,
         TargetDomainType,
         TargetHostname,

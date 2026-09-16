@@ -58,11 +58,8 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
             EventSeverity = iff(AuthFailureCount > 0 or LastTerminalOut =~ "Deny", "Low", "Informational"),
             EventCount = toint(1),
             LogonMethod = iff(PolicyName has_any ("RSA", "Safenet", "MFA"), "Multi factor authentication", "Username & Password"),
-            TargetUsernameType = case(
-                TargetUsername has "\\", "Windows",
-                TargetUsername has "@", "UPN",
-                "Simple"
-            ),
+            TargetUsernameType = _ASIM_GetUsernameType(TargetUsername),
+            TargetUserType = _ASIM_GetUserType(TargetUsername, ""),
             TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
             TargetDomainType = iff(TargetUsername has "\\", "Windows", ""),
             TargetAppName = PolicyName,
@@ -90,7 +87,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         | join kind=inner (
             LogonEvents
             | where EventResult == "Success"
-            | project SessionId, TargetUsername, TargetUsernameType, TargetDomain, TargetDomainType, TargetAppName, TargetAppType, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
+            | project SessionId, TargetUsername, TargetUsernameType, TargetUserType, TargetDomain, TargetDomainType, TargetAppName, TargetAppType, LogonTarget, LogonProtocol, LogonMethod, SrcIpAddr, Src, Dst, DvcIpAddr, DvcHostname, TargetHostname, DvcDomain
         ) on SessionId
         | extend
             EventStartTime = LogoffTime,
@@ -144,6 +141,7 @@ let ASimAuthenticationF5BigIpAPM = (disabled: bool = false) {
         Dst,
         TargetUsername,
         TargetUsernameType,
+        TargetUserType,
         TargetDomain,
         TargetDomainType,
         TargetHostname,
