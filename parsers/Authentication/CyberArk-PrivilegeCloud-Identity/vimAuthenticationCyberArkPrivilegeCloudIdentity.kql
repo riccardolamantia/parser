@@ -20,7 +20,12 @@ let vimAuthenticationCyberArkPrivilegeCloudIdentity = (
         EventType = iff(message == "cloud.core.logout", "Logoff", "Logon"),
         EventResult = iff(message == "cloud.core.loginfail", "Failure", "Success")
     | extend
-        EventResultDetails = iff(EventResult == "Failure", coalesce(tostring(CustomFields.failure_reason), "Other"), ""),
+        EventResultDetails = case(
+            EventResult != "Failure", "",
+            tostring(CustomFields.failure_reason) has_any ("Challenge not answered", "missing ability to satisfy challenge"), "MFA not satisfied",
+            tostring(CustomFields.failure_reason) has "abandoned or expired", "Session expired",
+            "Other"
+        ),
         EventSeverity = iff(EventResult == "Failure", "Low", "Informational"),
         TargetUsername = username,
         TargetUsernameType = "UPN",
