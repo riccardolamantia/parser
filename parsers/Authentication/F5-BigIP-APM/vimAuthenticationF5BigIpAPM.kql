@@ -1,9 +1,13 @@
 let vimAuthenticationF5BigIpAPM = (
         starttime: datetime = datetime(null),
         endtime: datetime = datetime(null),
-        targetusername_has: string = "",
+        username_has_any: dynamic = dynamic([]),
+        targetappname_has_any: dynamic = dynamic([]),
         srcipaddr_has_any_prefix: dynamic = dynamic([]),
-        eventresult_in: dynamic = dynamic([]),
+        srchostname_has_any: dynamic = dynamic([]),
+        eventtype_in: dynamic = dynamic([]),
+        eventresultdetails_in: dynamic = dynamic([]),
+        eventresult: string = "*",
         disabled: bool = false
     ) {
     let SessionClientIps = Syslog
@@ -126,9 +130,13 @@ let vimAuthenticationF5BigIpAPM = (
             Type = "Syslog";
     LogonEvents
     | union LogoffEvents
-    | where targetusername_has == "" or TargetUsername has targetusername_has
-    | where array_length(srcipaddr_has_any_prefix) == 0 or SrcIpAddr has_any (srcipaddr_has_any_prefix)
-    | where array_length(eventresult_in) == 0 or EventResult in (eventresult_in)
+    | where (array_length(username_has_any) == 0 or TargetUsername has_any (username_has_any))
+        and (array_length(targetappname_has_any) == 0 or TargetAppName has_any (targetappname_has_any))
+        and (array_length(srcipaddr_has_any_prefix) == 0 or has_any_ipv4_prefix(SrcIpAddr, srcipaddr_has_any_prefix))
+        and array_length(srchostname_has_any) == 0
+        and (array_length(eventtype_in) == 0 or EventType in~ (eventtype_in))
+        and (array_length(eventresultdetails_in) == 0 or EventResultDetails in~ (eventresultdetails_in))
+        and (eventresult == "*" or EventResult =~ eventresult)
     | extend
         Application = TargetAppName,
         IpAddr = SrcIpAddr
