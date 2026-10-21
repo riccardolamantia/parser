@@ -24,8 +24,7 @@ let vimAuthenticationCrowdStrikeFalconHost = (
     | extend
         EventResult = iff(EventOutcome == "true", "Success", "Failure"),
         EventResultDetails = iff(EventOutcome == "true", "", "Other"),
-        EventStartTime = TimeGenerated,
-        EventEndTime = TimeGenerated,
+        EventStartTime = coalesce(unixtime_milliseconds_todatetime(tolong(ReceiptTime)), TimeGenerated),
         EventCount = toint(1),
         EventSchema = "Authentication",
         EventSchemaVersion = "0.1.4",
@@ -42,18 +41,16 @@ let vimAuthenticationCrowdStrikeFalconHost = (
         TargetUsername = DestinationUserName,
         SrcIpAddr = DestinationTranslatedAddress,
         TargetAppName = ProcessName,
-        Dvc = Computer
+        Dvc = "FalconHost"
     | extend
+        EventEndTime = EventStartTime,
         TargetUsernameType = _ASIM_GetUsernameType(TargetUsername),
         TargetUserType = _ASIM_GetUserType(TargetUsername, ""),
         TargetAppType = "SaaS application",
         LogonTarget = TargetAppName,
         LogonProtocol = "HTTPS",
-        LogonMethod = iff(EventOriginalSubType == "twoFactorAuthenticate", "Multi factor authentication", "Username & Password"),
-        DvcHostname = extract(@"^([^.]+)", 1, Dvc),
-        DvcDomain = extract(@"^[^.]+\.(.+)$", 1, Dvc)
+        LogonMethod = iff(EventOriginalSubType == "twoFactorAuthenticate", "Multi factor authentication", "Username & Password")
     | extend
-        DvcDomainType = iff(isnotempty(DvcDomain), "FQDN", ""),
         DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
         Dst = TargetAppName,
         Src = SrcIpAddr,
@@ -84,9 +81,6 @@ let vimAuthenticationCrowdStrikeFalconHost = (
         EventOriginalResultDetails,
         EventUid,
         Dvc,
-        DvcHostname,
-        DvcDomain,
-        DvcDomainType,
         DvcAction,
         Dst,
         TargetUsername,
