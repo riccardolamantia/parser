@@ -1,0 +1,107 @@
+let vimAuthenticationCrowdStrikeFalconHost = (
+        starttime: datetime = datetime(null),
+        endtime: datetime = datetime(null),
+        username_has_any: dynamic = dynamic([]),
+        targetappname_has_any: dynamic = dynamic([]),
+        srcipaddr_has_any_prefix: dynamic = dynamic([]),
+        srchostname_has_any: dynamic = dynamic([]),
+        eventtype_in: dynamic = dynamic([]),
+        eventresultdetails_in: dynamic = dynamic([]),
+        eventresult: string = "*",
+        disabled: bool = false
+    ) {
+    let EventSeverityLookup = datatable (LogSeverity: string, EventSeverity: string) [
+        "0", "Informational",
+        "1", "Informational",
+        "2", "Low",
+        "3", "Medium",
+        "4", "High",
+        "5", "High"
+    ];
+    CommonSecurityLog
+    | where not(disabled)
+    | where isnull(starttime) or TimeGenerated >= starttime
+    | where isnull(endtime) or TimeGenerated <= endtime
+    | where DeviceVendor == "CrowdStrike" and DeviceProduct == "FalconHost"
+    | where DeviceEventCategory == "AuthActivityAuditEvent" and DeviceEventClassID in ("userAuthenticate", "twoFactorAuthenticate")
+    | lookup EventSeverityLookup on LogSeverity
+    | extend
+        EventResult = iff(EventOutcome == "true", "Success", "Failure"),
+        EventResultDetails = iff(EventOutcome == "true", "", "Other"),
+        EventStartTime = coalesce(unixtime_milliseconds_todatetime(tolong(ReceiptTime)), TimeGenerated),
+        EventCount = toint(1),
+        EventSchema = "Authentication",
+        EventSchemaVersion = "0.1.4",
+        EventType = "Logon",
+        EventSubType = "Remote",
+        EventVendor = "CrowdStrike",
+        EventProduct = "FalconHost",
+        EventOriginalSeverity = LogSeverity,
+        EventOriginalSubType = DeviceEventClassID,
+        EventOriginalType = DeviceEventCategory,
+        EventOriginalResultDetails = EventOutcome,
+        EventProductVersion = DeviceVersion,
+        EventUid = _ItemId,
+        TargetUsername = DestinationUserName,
+        SrcIpAddr = DestinationTranslatedAddress,
+        TargetAppName = ProcessName,
+        Dvc = "FalconHost"
+    | extend
+        EventEndTime = EventStartTime,
+        TargetUsernameType = _ASIM_GetUsernameType(TargetUsername),
+        TargetUserType = _ASIM_GetUserType(TargetUsername, ""),
+        TargetAppType = "SaaS application",
+        LogonTarget = TargetAppName,
+        LogonProtocol = "HTTPS",
+        LogonMethod = iff(EventOriginalSubType == "twoFactorAuthenticate", "Multi factor authentication", "Username & Password")
+    | extend
+        DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
+        Dst = TargetAppName,
+        Src = SrcIpAddr,
+        Application = TargetAppName,
+        IpAddr = SrcIpAddr,
+        Type = "CommonSecurityLog"
+    | where (array_length(username_has_any) == 0 or TargetUsername has_any (username_has_any))
+        and (array_length(targetappname_has_any) == 0 or TargetAppName has_any (targetappname_has_any))
+        and (array_length(srcipaddr_has_any_prefix) == 0 or has_any_ipv4_prefix(SrcIpAddr, srcipaddr_has_any_prefix))
+        and array_length(srchostname_has_any) == 0
+        and (array_length(eventtype_in) == 0 or EventType in~ (eventtype_in))
+        and (array_length(eventresultdetails_in) == 0 or EventResultDetails in~ (eventresultdetails_in))
+        and (eventresult == "*" or EventResult =~ eventresult)
+    | project
+        TimeGenerated,
+        EventStartTime,
+        EventEndTime,
+        EventCount,
+        EventType,
+        EventSubType,
+        EventResult,
+        EventResultDetails,
+        EventSeverity,
+        EventSchema,
+        EventSchemaVersion,
+        EventVendor,
+        EventProduct,
+        EventProductVersion,
+        EventOriginalSeverity,
+        EventOriginalSubType,
+        EventOriginalType,
+        EventOriginalResultDetails,
+        EventUid,
+        Dvc,
+        DvcAction,
+        Dst,
+        TargetUsername,
+        TargetUsernameType,
+        TargetUserType,
+        TargetAppName,
+        TargetAppType,
+        LogonTarget,
+        LogonProtocol,
+        LogonMethod,
+        SrcIpAddr,
+        Src,
+        Application,
+        IpAddr,
+        Type
+};

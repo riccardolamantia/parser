@@ -1,0 +1,92 @@
+let vimAuthenticationCyberArkVault = (
+        starttime: datetime = datetime(null),
+        endtime: datetime = datetime(null),
+        username_has_any: dynamic = dynamic([]),
+        targetappname_has_any: dynamic = dynamic([]),
+        srcipaddr_has_any_prefix: dynamic = dynamic([]),
+        srchostname_has_any: dynamic = dynamic([]),
+        eventtype_in: dynamic = dynamic([]),
+        eventresultdetails_in: dynamic = dynamic([]),
+        eventresult: string = "*",
+        disabled: bool = false
+    ) {
+    CommonSecurityLog
+    | where not(disabled)
+    | where isnull(starttime) or TimeGenerated >= starttime
+    | where isnull(endtime) or TimeGenerated <= endtime
+    | where DeviceVendor == "Cyber-Ark" and DeviceProduct == "Vault"
+    | where Activity in ("Logon", "Logoff", "Failure: User Authentication")
+    | extend
+        EventType = iff(Activity == "Logoff", "Logoff", "Logon"),
+        EventResult = iff(Activity startswith "Failure:", "Failure", "Success")
+    | extend
+        EventResultDetails = iff(EventResult == "Failure", "Other", ""),
+        EventSeverity = iff(EventResult == "Failure", "Low", "Informational"),
+        TargetUsername = SourceUserName,
+        SrcIpAddr = coalesce(SourceIP, SourceTranslatedAddress),
+        DvcIpAddr = DeviceAddress
+    | extend
+        TargetUsernameType = _ASIM_GetUsernameType(TargetUsername),
+        TargetUserType = _ASIM_GetUserType(TargetUsername, ""),
+        TargetDomain = extract(@"^([^\\]+)\\", 1, TargetUsername),
+        TargetDomainType = iff(TargetUsername has "\\", "Windows", ""),
+        Dvc = coalesce(DvcIpAddr, "CyberArk Vault"),
+        TargetAppName = "CyberArk Vault",
+        TargetAppType = "Service",
+        LogonTarget = "CyberArk Vault",
+        EventUid = _ItemId,
+        EventCount = toint(1),
+        EventStartTime = TimeGenerated,
+        EventEndTime = TimeGenerated,
+        EventSchema = "Authentication",
+        EventSchemaVersion = "0.1.4",
+        EventVendor = "CyberArk",
+        EventProduct = "Vault",
+        EventSubType = "Remote",
+        Type = "CommonSecurityLog"
+    | extend
+        Dst = Dvc,
+        Src = SrcIpAddr,
+        DvcAction = iff(EventResult == "Success", "Allowed", "Blocked"),
+        Application = TargetAppName,
+        IpAddr = SrcIpAddr
+    | where (array_length(username_has_any) == 0 or TargetUsername has_any (username_has_any))
+        and (array_length(targetappname_has_any) == 0 or TargetAppName has_any (targetappname_has_any))
+        and (array_length(srcipaddr_has_any_prefix) == 0 or has_any_ipv4_prefix(SrcIpAddr, srcipaddr_has_any_prefix))
+        and array_length(srchostname_has_any) == 0
+        and (array_length(eventtype_in) == 0 or EventType in~ (eventtype_in))
+        and (array_length(eventresultdetails_in) == 0 or EventResultDetails in~ (eventresultdetails_in))
+        and (eventresult == "*" or EventResult =~ eventresult)
+    | project
+        TimeGenerated,
+        EventStartTime,
+        EventEndTime,
+        EventCount,
+        EventType,
+        EventSubType,
+        EventResult,
+        EventResultDetails,
+        EventSeverity,
+        EventSchema,
+        EventSchemaVersion,
+        EventVendor,
+        EventProduct,
+        EventUid,
+        Dvc,
+        DvcIpAddr,
+        DvcAction,
+        Dst,
+        TargetUsername,
+        TargetUsernameType,
+        TargetUserType,
+        TargetDomain,
+        TargetDomainType,
+        TargetAppName,
+        TargetAppType,
+        LogonTarget,
+        SrcIpAddr,
+        Src,
+        Application,
+        IpAddr,
+        Type
+};
